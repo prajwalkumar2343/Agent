@@ -1,13 +1,15 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { describe, it } from 'node:test';
 import { MockLanguageModelV3 } from 'ai/test';
 import type { LanguageModelV3GenerateResult } from '@ai-sdk/provider';
-import { createCodingAgent, buildCodingPrompt } from '../src/agents/coding.ts';
+import { createOrchestrator, buildOrchestratorPrompt } from '../src/agents/orchestrator.ts';
 import type { GithubToolsContext } from '../src/tools/github.ts';
 import type { GithubHandoffResult } from '../src/agents/github.ts';
+import type { SandboxProvider, SandboxRunResult, SandboxTask } from '../src/sandbox/types.ts';
 
 const USAGE: LanguageModelV3GenerateResult['usage'] = {
   inputTokens: { total: 10, noCache: 10, cacheRead: 0, cacheWrite: 0 },
@@ -41,10 +43,45 @@ function seq(...r: LanguageModelV3GenerateResult[]): MockLanguageModelV3 {
   });
 }
 
-describe('two-agent handoff', () => {
-  it('primary delegates to github agent, which reports back', async () => {
-    const dir = mkdtempSync(path.join(tmpdir(), 'runner-deleg-'));
-    writeFileSync(path.join(dir, 'feat.ts'), 'export const f = 1;\n');
+function initRepo(): string {
+  const dir = mkdtempSync(path.join(tmpdir(), 'runner-orch-'));
+  execFileSync('git', ['init', '-q'], { cwd: dir });
+  execFileSync('git', ['config', 'user.email', 't@t'], { cwd: dir });
+  execFileSync('git', ['config', 'user.name', 't'], { cwd: dir });
+  writeFileSync(path.join(dir, 'base.txt'), 'old\n');
+  execFileSync('git', ['add', '-A'], { cwd: dir });
+  execFileSync('git', ['commit', '-qm', 'init'], { cwd: dir });
+  return dir;
+}
+
+const PATCH = `diff --git a/feat.ts b/feat.ts
+new file mode 100644
+index 0000000..3be9c81
+--- /dev/null
++++ b/feat.ts
+@@ -0,0 +1 @@
++export const f = 1;
+`;
+
+class FakeSandbox implements SandboxProvider {
+  readonly name = 'fake';
+  tasks: SandboxTask[] = [];
+  private patch: string;
+  private report: string;
+  constructor(patch: string, report = 'vm: implemented') {
+    this.patch = patch;
+    this.report = report;
+  }
+  async runTask(req: SandboxTask): Promise<SandboxRunResult> {
+    this.tasks.push(req);
+    return { patch: this.patch, report: this.report, exitCode: 0 };
+  }
+  async kill(): Promise<void> {}
+}
+
+describe('orchestrator handoff', () => {
+  it('delegates coding to the VM, applies the patch, then delegates to github', async () => {
+    const dir = initRepo();
 
     // Secondary agent: openPR (mocked fetch), then report text.
     const ghModel = seq(
@@ -65,17 +102,20 @@ describe('two-agent handoff', () => {
       fetchFn,
     };
 
-    // Primary agent: write file, delegate, then report with the PR it got back.
+    // Orchestrator: delegate to VM coder, delegate to github, then report.
     const model = seq(
-      call('p1', 'delegate_to_github', { summary: 'added feat.ts' }),
+      call('p1', 'delegate_to_vm_coder', { task: 'add feat.ts' }),
+      call('p2', 'delegate_to_github', { summary: 'added feat.ts' }),
       text('shipped: https://github.com/o/r/pull/9'),
     );
 
+    const sandbox = new FakeSandbox(PATCH);
     let handoff: GithubHandoffResult | undefined;
     const spec = { title: 't', slug: 'f', summary: 's', acceptance: ['a'] };
-    const harness = createCodingAgent({
+    const harness = createOrchestrator({
       root: dir,
       github,
+      sandbox,
       spec,
       flagKey: 'feat_f',
       model,
@@ -85,16 +125,20 @@ describe('two-agent handoff', () => {
       },
     });
 
-    const result = await harness.run(buildCodingPrompt({ spec, flagKey: 'feat_f' }));
+    const result = await harness.run(buildOrchestratorPrompt({ spec, flagKey: 'feat_f' }));
 
-    assert.ok(handoff, 'github agent result reached primary');
+    // VM patch was applied locally — the file the github agent commits exists.
+    assert.ok(existsSync(path.join(dir, 'feat.ts')));
+    assert.equal(readFileSync(path.join(dir, 'feat.ts'), 'utf8'), 'export const f = 1;\n');
+    assert.equal(sandbox.tasks.length, 1);
+    assert.match(sandbox.tasks[0]!.task, /add feat\.ts/);
+
+    assert.ok(handoff, 'github agent result reached orchestrator');
     assert.equal(handoff!.pr_number, 9);
-    assert.equal(handoff!.branch, 'agent/f-1.0');
-    assert.match(handoff!.report, /pull\/9/);
-    assert.match(result.text, /pull\/9/); // primary saw the report and used it
+    assert.match(result.text, /pull\/9/);
     assert.deepEqual(
       result.toolCalls.map((r) => r.toolName),
-      ['delegate_to_github'],
+      ['delegate_to_vm_coder', 'delegate_to_github'],
     );
   });
 });
