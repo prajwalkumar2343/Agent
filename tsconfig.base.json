@@ -12,6 +12,7 @@
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "allowImportingTsExtensions": true,
-    "noEmit": true
+    "noEmit": true,
+    "rewriteRelativeImportExtensions": true
   }
 }
