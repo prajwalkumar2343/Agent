@@ -7,6 +7,8 @@
 └───────────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
+Demo video: https://www.loom.com/share/bac29dc199cf4d5a812a4957de83ff1a
+
 > Ideas can come from anywhere not just from PMs mind
 > this slackbot agent enables anyone inside the organisation to pitch an idea, it gets built, verified by using simulated audiences (this project uses outset for it), and the PR comes for review along with audience reports to the PM
 
