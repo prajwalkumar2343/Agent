@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import handler, { routeEvent, runFeatureCheck, specFor } from './events.ts';
+import handler, { routeEvent, specFor } from './events.ts';
 import { createRunStoreFromEnv, newRun } from '../../packages/store/src/index.ts';
 import {
   fakeReq,
@@ -74,21 +74,19 @@ test('slack events: mention runs intake → spec → checked → build and dispa
     assert.equal(run.idea, 'add usage-based billing alerts');
     assert.equal(run.spec?.title, 'add usage-based billing alerts');
     assert.equal(run.flag_key, 'feat_add_usage_based_billing_alerts');
-    assert.ok(run.feature_check && run.feature_check.exists === false);
-    assert.equal(run.feature_check?.index?.searched, true);
-    assert.deepEqual(run.feature_check?.index?.hits, []);
+    assert.equal(run.feature_check, undefined);
 
     const posts = stub.jsonTo('slack.com/api/chat.postMessage') as {
       channel: string;
       text: string;
       thread_ts?: string;
     }[];
-    assert.equal(posts.length, 4); // thread ack + spec card, check card, building — all to the PM DM
+    assert.equal(posts.length, 3); // thread ack + spec card + building notice
     const toThread = posts.filter((p) => p.channel === 'C-ideas');
     const toPm = posts.filter((p) => p.channel === 'D-dm');
     assert.equal(toThread.length, 1);
     assert.match(toThread[0]!.text, /thanks for the feature request/i);
-    assert.equal(toPm.length, 3);
+    assert.equal(toPm.length, 2);
     const dispatch = stub.to('api.github.com')[0];
     assert.ok(dispatch, 'workflow dispatch fired');
     assert.match(dispatch.url, /repos\/org\/platform\/actions\/workflows\/feature-run\.yml\/dispatches/);
@@ -103,7 +101,7 @@ test('slack events: mention runs intake → spec → checked → build and dispa
   }
 });
 
-test('slack events: an idea the feature index already covers gets "already exists" and no build', async () => {
+test('slack events: an idea the feature index covers still builds (no already-exists check)', async () => {
   setBaseEnv();
   const stub = installFetchStub();
   try {
@@ -117,17 +115,15 @@ test('slack events: an idea the feature index already covers gets "already exist
 
     const run = await store().get('1700.0005');
     assert.ok(run, 'run was created');
-    assert.equal(run.state, 'done', 'index hit closes the run');
-    assert.ok(run.feature_check && run.feature_check.exists === true);
-    assert.ok((run.feature_check?.index?.hits.length ?? 0) > 0);
+    assert.equal(run.state, 'build', 'no already-exists gate — every idea builds');
 
     const posts = stub.jsonTo('slack.com/api/chat.postMessage') as {
       channel: string;
       text: string;
     }[];
     const toThread = posts.filter((p) => p.channel === 'C-ideas');
-    assert.match(toThread.at(-1)!.text, /already exists/i);
-    assert.equal(stub.to('api.github.com').length, 0, 'no build dispatched');
+    assert.doesNotMatch(toThread.at(-1)!.text, /already exists/i);
+    assert.equal(stub.to('api.github.com').length, 1, 'build dispatched');
   } finally {
     stub.restore();
   }
@@ -272,14 +268,8 @@ test('slack events: a bare mention asks for the idea and creates no run', async 
   }
 });
 
-test('specFor mock + runFeatureCheck degrade without external services', async () => {
+test('specFor mock drafts a deterministic spec without external services', async () => {
   setBaseEnv();
   const spec = await specFor('usage-based billing alerts');
   assert.equal(spec.slug, 'usage-based-billing-alerts');
-  const check = await runFeatureCheck(spec);
-  assert.equal(check.exists, false);
-  assert.equal(check.docs.searched, false);
-  assert.equal(check.events.searched, false);
-  assert.equal(check.index?.searched, true);
-  assert.deepEqual(check.index?.hits, []);
 });

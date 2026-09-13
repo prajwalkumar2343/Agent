@@ -5,14 +5,10 @@ import {
   requireEnv,
   slugify,
   RUN_COMPLETE_SECRET_HEADER,
-  type Evidence,
-  type FeatureCheck,
   type Run,
   type Spec,
 } from '../../packages/shared/src/index.ts';
 import {
-  evidenceBlocks,
-  featureCheckBlocks,
   postMessage,
   specBlocks,
   verifySlackSignature,
@@ -26,20 +22,14 @@ import {
 } from '../../packages/store/src/index.ts';
 import { audit, checkIntake } from '../../packages/guard/src/index.ts';
 import {
-  featureIndexEntries,
   flagKeyForSpec,
   generateSpec,
-  matchFeatureIndex,
 } from '../../packages/spec/src/index.ts';
 import { modelFromEnv } from '../../packages/runner/src/model.ts';
-import { docsClientFromEnv } from '../../packages/mintlify/src/index.ts';
 import {
-  collectEvidence,
   createPostHogMcp,
   ensureFeatureFlag,
-  featureCheckEvents,
   posthogMcpConfigFromEnv,
-  specKeywords,
 } from '../../packages/posthog/src/index.ts';
 import { dispatchFeatureRun } from '../_lib/github.ts';
 import { dmUser } from '../_lib/notify.ts';
@@ -102,63 +92,6 @@ export async function specFor(idea: string): Promise<Spec> {
     };
   }
   return generateSpec(idea, modelFromEnv());
-}
-
-const squash = (s: string): string => s.toLowerCase().replace(/[^a-z0-9]/g, '');
-
-/**
- * The `checked` state's three-signal check: the shipped-feature index
- * (features.md), Mintlify docs search, and the PostHog event taxonomy. A
- * docs hit counts only when a spec keyword actually appears in the page
- * title/url — a bare top-k result is not evidence. Unreachable sources mark
- * `searched:false` rather than failing the run.
- */
-export async function runFeatureCheck(spec: Spec): Promise<FeatureCheck> {
-  const keys = specKeywords(spec).map(squash);
-
-  const entries = featureIndexEntries();
-  const index: NonNullable<FeatureCheck['index']> = {
-    searched: entries !== null,
-    hits: entries ? matchFeatureIndex(entries, keys) : [],
-  };
-
-  const docs: FeatureCheck['docs'] = { searched: false, pages: [], hits: [] };
-  if (process.env.DOCS_MCP_URL) {
-    try {
-      const hits = await docsClientFromEnv().search(`${spec.title} ${spec.summary}`, 5);
-      docs.searched = true;
-      docs.pages = hits.map((h) => h.url).filter(Boolean);
-      docs.hits = hits
-        .filter((h) => keys.some((k) => squash(`${h.title} ${h.url}`).includes(k)))
-        .map((h) => h.title);
-    } catch (err) {
-      console.error('docs search failed', err);
-    }
-  }
-
-  const events: FeatureCheck['events'] = { searched: false, matched: [] };
-  if (process.env.POSTHOG_API_KEY) {
-    const ph = createPostHogMcp(posthogMcpConfigFromEnv());
-    const r = await featureCheckEvents(ph, spec);
-    events.searched = r.searched;
-    events.matched = r.matched;
-  }
-
-  const indexHit = index.hits.length > 0;
-  const docHit = docs.hits.length > 0;
-  const eventHit = events.matched.length > 0;
-  const exists = indexHit || docHit || eventHit;
-  const signals = [indexHit, docHit, eventHit].filter(Boolean).length;
-  const searched = index.searched || docs.searched || events.searched;
-  const confidence = exists ? (signals >= 2 ? 0.9 : 0.65) : searched ? 0.2 : 0;
-  const reason = exists
-    ? indexHit
-      ? `Feature index already lists "${spec.title}": ${index.hits.slice(0, 3).join(', ')}.`
-      : `${signals} signal(s) suggest "${spec.title}" already ships.`
-    : searched
-      ? `No check source mentions "${spec.title}".`
-      : 'All check sources were unreachable — proceeding without a check.';
-  return { exists, confidence, reason, docs, events, index };
 }
 
 function failText(err: unknown): string {
@@ -253,45 +186,6 @@ export async function handleIdea(event: SlackEvent): Promise<void> {
     await transitionRun(store, threadTs, 'spec', { spec, flag_key: flagKey });
     await pmSay(`Spec drafted — *${spec.title}* (${runRef})`, specBlocks(spec, flagKey));
 
-    const check = await runFeatureCheck(spec);
-    await transitionRun(store, threadTs, 'checked', { feature_check: check });
-    const indexHits = check.index?.hits ?? [];
-    await pmSay(
-      indexHits.length
-        ? 'Feature check: this already exists — closing the run.'
-        : check.exists
-          ? 'Feature check: this may already exist — see below.'
-          : 'Feature check: looks new.',
-      featureCheckBlocks(check),
-    );
-
-    // A shipped-feature index hit is authoritative — the product already has
-    // this, so tell the requester it exists and close the run: no evidence,
-    // no flag, no build.
-    if (indexHits.length) {
-      await threadSay(
-        `That feature already exists — "${spec.title}" is covered by ` +
-          `${indexHits.slice(0, 3).join(', ')}. Nothing to build.`,
-      );
-      await transitionRun(store, threadTs, 'done');
-      return;
-    }
-
-    // exists=false skips `evidence` straight to `build` (docs/CONTRACTS.md).
-    let evidence: Evidence | undefined;
-    if (check.exists && process.env.POSTHOG_API_KEY) {
-      try {
-        evidence = await collectEvidence(
-          createPostHogMcp(posthogMcpConfigFromEnv()),
-          spec,
-        );
-        await transitionRun(store, threadTs, 'evidence', { evidence });
-        await pmSay('Evidence collected.', evidenceBlocks(evidence));
-      } catch (err) {
-        console.error(`evidence failed for ${threadTs}`, err);
-      }
-    }
-
     // The flag must exist before the merge gate can set a rollout — the
     // coding agent also ensures it, so a PostHog outage here is not fatal.
     let flagId: number | undefined;
@@ -318,11 +212,11 @@ export async function handleIdea(event: SlackEvent): Promise<void> {
       thread_ts: threadTs,
       spec_json: JSON.stringify(spec),
       feature_context_json: JSON.stringify({
-        check,
+        check: null,
         channel: event.channel,
         requester_id: event.user ?? '',
       }),
-      evidence_json: JSON.stringify(evidence ?? null),
+      evidence_json: JSON.stringify(null),
       flag_key: flagKey,
       callback_url: `https://${host}/api/runs/complete`,
     });

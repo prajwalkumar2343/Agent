@@ -6,8 +6,6 @@ import { newRun } from './store.ts';
 const HAPPY_PATH = [
   'received',
   'spec',
-  'checked',
-  'evidence',
   'build',
   'reported',
   'await_rollout',

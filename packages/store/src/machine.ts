@@ -3,18 +3,17 @@ import type { Run, RunState } from '../../shared/src/index.ts';
 /**
  * Legal run-state edges, mirroring docs/CONTRACTS.md:
  *
- *   received → spec → checked → evidence → build → reported
+ *   received → spec → build → reported
  *     → await_rollout → await_ci → live → monitor → done
  *                        ↺ CI red    ↘ rolled_back   ↘ failed (any state)
  *
- * `checked → build` is the exists=false shortcut (skip evidence).
- * `checked → done` exits early when the shipped-feature index (features.md)
- * already covers the idea — the requester is told, nothing is built.
+ * (`checked` / `evidence` edges are retained for runs created before the
+ *  feature-exists check was removed; new runs go spec → build directly.)
  * `await_ci → await_rollout` is the CI-red path (PM asked to iterate).
  */
 const EDGES: Record<RunState, RunState[]> = {
   received: ['spec'],
-  spec: ['checked'],
+  spec: ['build'],
   checked: ['evidence', 'build', 'done'],
   evidence: ['build'],
   build: ['reported'],

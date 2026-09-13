@@ -6,16 +6,14 @@ the code wins. Change contracts only via a dedicated PR to `packages/shared`.
 ## Run states
 
 ```
-received → spec → checked → evidence → build → reported
+received → spec → build → reported
   → await_rollout → await_ci → live → monitor → done
-    ↘ done (feature-index hit)             ↘ rolled_back   ↘ failed (any state)
+    ↘ rolled_back   ↘ failed (any state)
 ```
 
-- `checked`: three-signal feature check done — shipped-feature index
-  (`features.md`) + docs MCP + PostHog taxonomy. An index hit is
-  authoritative: the requester is told the feature already exists and the
-  run goes straight to `done`. Otherwise, if `exists=false`, skip
-  `evidence` and go straight to `build`.
+- Every accepted idea builds — there is no already-exists gate. (The
+  `checked` / `evidence` states remain legal edges for runs created
+  before the feature check was removed.)
 - `await_ci`: PM confirmed rollout; waiting for green check_runs on the PR
   before auto-merge + flag enable.
 
