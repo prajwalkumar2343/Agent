@@ -56,15 +56,15 @@ function pri(trace: TraceFile): { priority: number; reason: string } {
 function main(): void {
   const argv = process.argv.slice(2);
   const i = argv.indexOf('--results');
-  const dir = path.resolve(
-    i >= 0
-      ? argv[i + 1]!
-      : path.join(
-          EVALS,
-          'results',
-          readdirSync(path.join(EVALS, 'results')).filter((d) => d !== 'history.jsonl').sort().pop()!,
-        ),
-  );
+  const resultsRoot = path.join(EVALS, 'results');
+  const latest = existsSync(resultsRoot)
+    ? readdirSync(resultsRoot).filter((d) => d !== 'history.jsonl').sort().pop()
+    : undefined;
+  if (i < 0 && !latest) {
+    console.log('review queue: no results found — nothing to review');
+    return;
+  }
+  const dir = path.resolve(i >= 0 ? argv[i + 1]! : path.join(resultsRoot, latest!));
   const tracesDir = path.join(dir, 'traces');
   if (!existsSync(tracesDir)) throw new Error(`no traces dir under ${dir}`);
 
