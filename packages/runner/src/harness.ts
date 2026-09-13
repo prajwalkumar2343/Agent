@@ -10,9 +10,11 @@ import {
   type StopCondition,
   type ToolSet,
 } from 'ai';
+import { createTraceRecorder } from './trace.ts';
 
 export interface ToolCallRecord {
   step: number;
+  toolCallId?: string;
   toolName: string;
   input: unknown;
   output?: unknown;
@@ -31,6 +33,8 @@ export interface HarnessResult {
   responseMessages: ModelMessage[];
   /** True when the run stopped because maxSteps was hit rather than the model finishing. */
   truncated: boolean;
+  /** Span-contract trace — present when `options.trace` metadata was given. */
+  trace?: import('./trace.ts').AgentTrace;
 }
 
 export interface HarnessOptions {
@@ -53,6 +57,11 @@ export interface HarnessOptions {
   abortSignal?: AbortSignal;
   /** Passed through to the model call (temperature, maxOutputTokens, ...). */
   settings?: Omit<CallSettings, 'abortSignal'>;
+  /**
+   * Trace metadata — when set, the harness times every tool execution and
+   * model step and attaches an AgentTrace (see trace.ts) to the result.
+   */
+  trace?: import('./trace.ts').TraceMeta;
 }
 
 export interface Harness {
@@ -89,16 +98,18 @@ export function createHarness(options: HarnessOptions): Harness {
     onToolCall,
     abortSignal,
     settings,
+    trace,
   } = options;
   const log = options.logger === null ? () => {} : (options.logger ?? defaultLogger);
 
   async function run(prompt: string | ModelMessage[]): Promise<HarnessResult> {
     const toolCalls: ToolCallRecord[] = [];
+    const recorder = trace ? createTraceRecorder(trace) : undefined;
 
     const result = await generateText({
       model,
       system,
-      tools,
+      tools: recorder ? recorder.wrapTools(tools) : tools,
       ...(typeof prompt === 'string' ? { prompt } : { messages: prompt }),
       stopWhen: [
         stepCountIs(maxSteps),
@@ -113,6 +124,7 @@ export function createHarness(options: HarnessOptions): Harness {
           log(`› ${tc.toolName} ${summarizeInput(tc.input)}`);
           const rec: ToolCallRecord = {
             step: step.stepNumber,
+            toolCallId: tc.toolCallId,
             toolName: tc.toolName,
             input: tc.input,
           };
@@ -129,19 +141,23 @@ export function createHarness(options: HarnessOptions): Harness {
           }
         }
         for (const rec of pending.values()) onToolCall?.(rec);
+        recorder?.onStep(step);
         onStep?.(step);
       },
     });
 
-    return {
+    const truncated =
+      result.steps.length >= maxSteps && result.finishReason === 'tool-calls';
+    const partial: HarnessResult = {
       text: result.text,
       steps: result.steps,
       toolCalls,
       totalUsage: result.totalUsage,
       finishReason: result.finishReason,
       responseMessages: result.response.messages,
-      truncated: result.steps.length >= maxSteps && result.finishReason === 'tool-calls',
+      truncated,
     };
+    return recorder ? { ...partial, trace: recorder.finish(partial) } : partial;
   }
 
   return { run };

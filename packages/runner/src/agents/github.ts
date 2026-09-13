@@ -1,7 +1,7 @@
-import { anthropic } from '@ai-sdk/anthropic';
 import { tool, type LanguageModel, type Tool } from 'ai';
 import { z } from 'zod';
 import { createHarness } from '../harness.ts';
+import { llmProvider, modelFromEnv } from '../model.ts';
 import { githubTools, type GithubToolsContext } from '../tools/github.ts';
 
 export interface GithubHandoffResult {
@@ -11,6 +11,19 @@ export interface GithubHandoffResult {
   /** The GitHub agent's closing report — returned to the primary agent. */
   report: string;
   truncated: boolean;
+  /** Sub-agent trajectory — for the caller/evals; not sent back to the model. */
+  trace?: import('../trace.ts').AgentTrace;
+}
+
+/** What the delegate tool returns into the primary agent's context. */
+function modelFacing(r: GithubHandoffResult) {
+  return {
+    branch: r.branch,
+    pr_url: r.pr_url,
+    pr_number: r.pr_number,
+    report: r.report,
+    truncated: r.truncated,
+  };
 }
 
 const GITHUB_SYSTEM = `You are the GitHub operations agent in a feature pipeline.
@@ -40,12 +53,19 @@ export async function runGithubAgent(
   model?: LanguageModel,
 ): Promise<GithubHandoffResult> {
   let pr: { pr_url?: string; pr_number?: number } = {};
+  const m = model ?? modelFromEnv();
   const harness = createHarness({
-    model: model ?? anthropic(process.env.ANTHROPIC_MODEL ?? 'claude-sonnet-4-5'),
+    model: m,
     system: GITHUB_SYSTEM,
     tools: githubTools(ctx),
     maxSteps: 15,
     logger: (line) => process.stdout.write(`[github] ${line}\n`),
+    trace: {
+      agent: 'github',
+      session_id: `${ctx.repo}@${ctx.branch}`,
+      model_id: typeof m === 'string' ? m : m.modelId,
+      provider: llmProvider(),
+    },
     onToolCall: (rec) => {
       if (rec.toolName === 'openPR' && !rec.isError) {
         pr = rec.output as typeof pr;
@@ -59,6 +79,7 @@ export async function runGithubAgent(
     pr_number: pr.pr_number,
     report: result.text,
     truncated: result.truncated,
+    trace: result.trace,
   };
 }
 
@@ -95,7 +116,7 @@ export function githubDelegateTool(
       ].join('\n');
       const r = await runGithubAgent(ctx, task, model);
       onResult?.(r);
-      return r;
+      return modelFacing(r);
     },
   });
 }
