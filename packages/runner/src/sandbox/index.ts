@@ -26,7 +26,7 @@ const DEFAULT_PI_MODEL: Record<string, string> = {
   google: 'gemini-2.5-pro',
   openrouter: 'anthropic/claude-sonnet-4.5',
   opencode: 'claude-sonnet-4-5',
-  'opencode-go': 'kimi-k2',
+  'opencode-go': 'muse-spark-1.3-contributor',
   groq: 'llama-3.3-70b-versatile',
   mistral: 'mistral-large-latest',
 };

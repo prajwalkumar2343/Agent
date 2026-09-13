@@ -41,7 +41,7 @@ const DEFAULT_MODEL: Record<LlmProvider, string> = {
   anthropic: 'claude-sonnet-4-5',
   openrouter: 'anthropic/claude-sonnet-4.5',
   opencode: 'claude-sonnet-4-5',
-  'opencode-go': 'kimi-k3',
+  'opencode-go': 'muse-spark-1.3-contributor',
 };
 
 /** Cheaper tier — the eval judge's default. */
@@ -49,7 +49,7 @@ const DEFAULT_CHEAP_MODEL: Record<LlmProvider, string> = {
   anthropic: 'claude-haiku-4-5',
   openrouter: 'anthropic/claude-haiku-4.5',
   opencode: 'claude-haiku-4-5',
-  'opencode-go': 'deepseek-v4-flash',
+  'opencode-go': 'muse-spark-1.3-contributor',
 };
 
 const ZEN_BASE = 'https://opencode.ai/zen/v1';
