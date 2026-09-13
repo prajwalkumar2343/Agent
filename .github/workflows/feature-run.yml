@@ -50,6 +50,9 @@ jobs:
           # through the REST tools with the token held in-process.
           persist-credentials: false
 
+      - name: install pi (local sandbox)
+        run: command -v pi >/dev/null 2>&1 || npm i -g @mariozechner/pi-coding-agent
+
       - name: run coding agent
         working-directory: platform
         env:
