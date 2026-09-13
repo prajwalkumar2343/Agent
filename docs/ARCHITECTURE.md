@@ -8,7 +8,8 @@ Slack mention/DM ──▶ api/slack/events ──▶ create run (received)
                                           │                          (mintlify + posthog)
                                           ▼
                               workflow_dispatch → feature-run.yml
-                                (runner: AI SDK harness + workspace tools)
+                                (runner: orchestrator → pi in a sandbox VM
+                                 → github agent; patch back, verify, PR)
                                           │ POST /api/runs/complete
                                           ▼
                           reported → await_rollout ◀── PM "roll out to N%"
@@ -34,9 +35,12 @@ Rules that keep this scalable:
 - **api → packages → shared.** Packages never import `api/`; packages never
   import each other's implementations — they compose inside handlers via
   `packages/shared` types.
-- **Effects behind ports.** `RunStore`, `SimProvider`, `PostHogClient`,
-  `DocsClient` are interfaces; KV/Slack/PostHog/MCP adapters are injectable
-  (`fetchFn`, config objects) so tests need no live services.
+- **Effects behind ports.** `RunStore`, `SimProvider`, `PostHogMcp`,
+  `DocsClient` are interfaces; KV/Slack/PostHog-MCP/Mintlify-MCP adapters are
+  injectable (`fetchFn`, config objects) so tests need no live services.
+  PostHog rides the hosted MCP server (`mcp.posthog.com`) — one transport
+  (`packages/posthog/src/mcp.ts`) backs evidence, flags, metrics, and the
+  coding agent's `posthog` tool.
 - **Auth at the boundary.** Every handler verifies its caller before touching
   state: Slack HMAC + team allowlist, `x-run-secret` for internal endpoints,
   `?secret` for cron, optional `GH_WEBHOOK_SECRET` HMAC, `PM_USER_IDS` for the
@@ -62,8 +66,11 @@ Rules that keep this scalable:
 - KV store is read-modify-write, last-write-wins. One run per thread + human
   cadence makes this safe; add CAS in `packages/store/src/kv.ts` if needed.
 - `store.list()` scans all runs per sweep — fine to ~10³ runs.
-- `packages/runner` has no sandbox beyond path confinement; it runs inside a
-  GitHub Actions job which is the trust boundary.
+- `packages/runner` delegates edits to pi in an E2B sandbox VM — the real
+  trust boundary. The orchestrator's local shell is read-only-ish (no
+  writeFile) and the VM never sees pipeline secrets, only `PI_API_KEY`.
+  `SANDBOX_PROVIDER=local` runs pi as a child process instead — same
+  contract, weaker boundary (dev only).
 - If PR merge fails in `api/github/webhook`, the run stays `await_ci` — the
   next check_run event retries. There is no dead-letter; failures land in
   Vercel logs.

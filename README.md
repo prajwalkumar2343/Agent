@@ -22,11 +22,11 @@ packages/
   slack-kit/  signature verify + fetch-based Slack API client + Block Kit cards
   store/      run state machine on Vercel KV              [A3]
   mintlify/   docs MCP search + featureExists()           [A5]
-  posthog/    evidence.ts [A6] · flags.ts [A9] · metrics.ts [A10]
+  posthog/    mcp.ts transport · evidence.ts [A6] · flags.ts [A9] · metrics.ts [A10]
   sim/        SimProvider interface + providers/          [A6]
-  runner/     AI SDK tool-loop that builds the feature    [A7]
+  runner/     orchestrator harness → pi coding agent in a sandbox VM → github agent [A7]
 .github/workflows/  feature-run dispatch · */15min sweep · platform CI [A8]
-docs/         ARCHITECTURE · CONTRACTS · ENV · WORKSTREAMS · SETUP
+docs/         ARCHITECTURE · CONTRACTS · ENV · SAFEGUARDS · WORKSTREAMS · SETUP
 scripts/      slack-app-manifest.yml
 ```
 

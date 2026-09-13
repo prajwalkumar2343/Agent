@@ -15,11 +15,11 @@ files; don't create new top-level packages or rewire entry points.
 | A3 | Run pipeline endpoints | `api/runs/complete.ts`, `api/github/webhook.ts` (extends `packages/store`) | base stub works; deepen |
 | A4 | Spec generation | `packages/spec` | port + impl landed |
 | A5 | Docs feature check | `packages/mintlify` (evidence composition) | client landed |
-| A6 | PostHog evidence + sim | `packages/posthog/src/evidence.ts`, `packages/sim` | mock landed |
-| A7 | Coding agent | `packages/runner` (prompt, tools, cli, evals) | in flight — `cli.ts` owns branch/push/PR/callback per `docs/RUNNER.md` |
+| A6 | PostHog evidence + sim | `packages/posthog/src/evidence.ts`, `packages/sim` | evidence via MCP landed; sim mock landed |
+| A7 | Coding agent | `packages/runner` (prompt, tools, cli, evals) | orchestrator → pi-in-VM (`delegate_to_vm_coder`) → github agent per `docs/RUNNER.md`; sandbox port: e2b + local; `posthog` MCP tool wired |
 | A8 | Actions plumbing | `.github/workflows/feature-run.yml`, `sweep.yml` | landed — workflow just invokes `packages/runner/src/cli.ts` |
-| A9 | Rollout control | `api/rollout/parse.ts`, `packages/posthog/src/flags.ts`, button handling in interactions | base landed |
-| A10 | Metrics + sweep | `api/cron/sweep.ts` `metricLine`, `packages/posthog/src/metrics.ts` | seam landed |
+| A9 | Rollout control | `api/rollout/parse.ts`, `packages/posthog/src/flags.ts`, button handling in interactions | flags over MCP landed |
+| A10 | Metrics + sweep | `api/cron/sweep.ts` `metricLine`, `packages/posthog/src/metrics.ts` | metrics over MCP landed |
 
 ## Wiring notes between workstreams
 
