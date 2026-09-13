@@ -6,3 +6,17 @@ node_modules/
 dist/
 *.tsbuildinfo
 .DS_Store
+
+# Eval run artifacts — results dirs, sampled scores, alert state, drafts.
+# evals/history.jsonl and evals/baseline.json ARE committed (score history).
+packages/runner/evals/results/
+packages/runner/evals/online/traces/
+packages/runner/evals/online/scores.jsonl
+packages/runner/evals/online/alerts.active.json
+packages/runner/evals/online/candidates.jsonl
+packages/runner/evals/online/last-*.json
+
+# Mock audience-sim app — local-only test stand-in, never commit
+packages/sim/src/mcp/server.ts
+packages/sim/src/mcp/responses.ts
+packages/sim/src/mcp.test.ts
