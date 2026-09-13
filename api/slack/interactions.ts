@@ -1,6 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { waitUntil } from '@vercel/functions';
-import { requireEnv } from '../../packages/shared/src/env';
+import { pmUserIds, pipelinePaused, requireEnv } from '../../packages/shared/src/env';
 import { ACTION } from '../../packages/shared/src/contracts';
 import { verifySlackSignature } from '../../packages/slack-kit/src/index';
 
@@ -54,11 +54,35 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const known = Object.values(ACTION) as string[];
   if (!known.includes(actionId)) return;
 
+  const userId = payload.user?.id ?? '';
+  const respond = (text: string) =>
+    respondEphemeral(payload.response_url!, text).catch((err) =>
+      console.error('respondEphemeral failed', err),
+    );
+
+  // Control-plane actions are PM-only — a random workspace member (or a
+  // forged-looking click) must never advance rollout/rollback.
+  if (!pmUserIds().includes(userId)) {
+    console.log(
+      JSON.stringify({
+        audit: 'interaction_denied',
+        at: Date.now(),
+        user: userId,
+        action: actionId,
+      }),
+    );
+    waitUntil(respond('Only PMs can drive rollouts.'));
+    return;
+  }
+  if (pipelinePaused()) {
+    waitUntil(respond('Pipeline is paused (AGENT_PAUSED) — no actions right now.'));
+    return;
+  }
+
   waitUntil(
-    respondEphemeral(
-      payload.response_url,
+    respond(
       `Received \`${actionId}\` — rollout execution comes online with the rollout workstream.`,
-    ).catch((err) => console.error('respondEphemeral failed', err)),
+    ),
   );
 }
 

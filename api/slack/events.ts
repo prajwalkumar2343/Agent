@@ -1,6 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { waitUntil } from '@vercel/functions';
-import { requireEnv } from '../../packages/shared/src/env';
+import { pmUserIds, requireEnv } from '../../packages/shared/src/env';
 import { postMessage, verifySlackSignature } from '../../packages/slack-kit/src/index';
 
 export const config = { api: { bodyParser: false }, maxDuration: 30 };
@@ -34,7 +34,7 @@ interface SlackEvent {
 
 async function handleIdea(event: SlackEvent): Promise<void> {
   if (!event.channel) return;
-  const idea = (event.text ?? '').replace(/<@[A-Z0-9]+>/g, '').trim();
+  const idea = (event.text ?? '').replace(/<@[A-Z0-9]+(?:\|[^>]*)?>/g, '').trim();
   await postMessage({
     channel: event.channel,
     thread_ts: event.thread_ts ?? event.ts,
@@ -78,10 +78,36 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const isDm = event.type === 'message' && event.channel_type === 'im';
   if (!isMention && !isDm) return;
 
-  const id = payload.event_id ?? '';
-  if (seenEventIds.has(id)) return;
-  seenEventIds.add(id);
-  if (seenEventIds.size > 5000) seenEventIds.clear();
+  // Events without an event_id skip dedup — otherwise they would all
+  // collapse onto one '' key and every event after the first is dropped.
+  const id = payload.event_id;
+  if (id) {
+    if (seenEventIds.has(id)) return;
+    seenEventIds.add(id);
+    if (seenEventIds.size > 5000) seenEventIds.clear();
+  }
+
+  // Intake is PM-only — a random workspace member must not kick off runs.
+  if (!pmUserIds().includes(event.user ?? '')) {
+    console.log(
+      JSON.stringify({
+        audit: 'intake_denied',
+        at: Date.now(),
+        user: event.user,
+        channel: event.channel,
+      }),
+    );
+    if (event.channel) {
+      waitUntil(
+        postMessage({
+          channel: event.channel,
+          thread_ts: event.thread_ts ?? event.ts,
+          text: 'Only PMs can kick off runs.',
+        }).catch((err) => console.error('intake denial reply failed', err)),
+      );
+    }
+    return;
+  }
 
   waitUntil(handleIdea(event).catch((err) => console.error('handleIdea failed', err)));
 }
