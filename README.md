@@ -1,6 +1,7 @@
 # Agent — the Slack-native feature pipeline
 
 ```
+TO use bot join
 ┌───────────────────────────────────────────────────────────────────────────────────────────┐
 │  Join the Slack workspace:                                                                │
 │  https://join.slack.com/t/hello-c0h3953/shared_invite/zt-4a5im5gw0-_S62BceFs9P~Vr1fW5dy2g │
@@ -10,7 +11,7 @@
 Demo video: https://www.loom.com/share/bac29dc199cf4d5a812a4957de83ff1a
 
 > Ideas can come from anywhere not just from PMs mind
-> this slackbot agent enables anyone inside the organisation to pitch an idea, it gets built, verified by using simulated audiences (this project uses outset for it), and the PR comes for review along with audience reports to the PM
+> this slackbot agent enables anyone inside the organisation to pitch an idea, it gets built, verified by using simulated audiences (this project uses outset for it), and the PR comes for review along with audience reports to the PM, if PM approves the deployment to certain percentage of users, it gets deployed
 
 
 ```
