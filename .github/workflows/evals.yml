@@ -82,15 +82,22 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run evals:dataset
+      - name: check for model key
+        id: key
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: echo "present=${ANTHROPIC_API_KEY:+yes}" >> "$GITHUB_OUTPUT"
       - name: full suite (3 trials, judge on)
+        if: steps.key.outputs.present == 'yes'
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           JUDGE_MODEL: claude-haiku-4-5
         run: npm run evals:judge -- --suite all --trials 3
       - name: gate
+        if: steps.key.outputs.present == 'yes'
         run: npm run evals:gate
       - name: review queue
-        if: failure()
+        if: failure() && steps.key.outputs.present == 'yes'
         run: npm run evals:review
       - uses: actions/upload-artifact@v4
         if: always()
