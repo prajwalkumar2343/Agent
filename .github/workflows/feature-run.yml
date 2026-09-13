@@ -80,5 +80,6 @@ jobs:
           POSTHOG_PROJECT_ID: ${{ vars.POSTHOG_PROJECT_ID }}
           POSTHOG_MCP_URL: ${{ vars.POSTHOG_MCP_URL }}
           RUN_CALLBACK_SECRET: ${{ secrets.RUN_CALLBACK_SECRET }}
+          DEPLOY_API_URL: ${{ vars.DEPLOY_API_URL }}
           LOG_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: node --experimental-strip-types packages/runner/src/cli.ts

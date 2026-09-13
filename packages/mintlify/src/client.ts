@@ -26,6 +26,18 @@ interface JsonRpcResponse {
   error?: { code: number; message: string };
 }
 
+const PROTOCOL_VERSION = '2025-06-18';
+const CLIENT_INFO = { name: 'platform-agent', version: '0.0.0' };
+
+class DocsMcpError extends Error {
+  readonly status?: number;
+  constructor(message: string, status?: number) {
+    super(message);
+    this.name = 'DocsMcpError';
+    this.status = status;
+  }
+}
+
 /** Extract the tool's text payload and parse embedded JSON when present. */
 function toolText(json: JsonRpcResponse): string {
   if (json.error) throw new Error(`docs mcp error ${json.error.code}: ${json.error.message}`);
@@ -38,35 +50,104 @@ function toolText(json: JsonRpcResponse): string {
 export function createDocsClient(config: DocsClientConfig): DocsClient {
   const call = config.fetchFn ?? fetch;
   let id = 0;
+  let sessionId: string | undefined;
+  let initPromise: Promise<void> | null = null;
 
-  async function rpc<T>(method: string, params: unknown): Promise<T> {
+  function headers(): Record<string, string> {
+    const h: Record<string, string> = {
+      'content-type': 'application/json',
+      accept: 'application/json, text/event-stream',
+    };
+    if (sessionId) {
+      h['mcp-session-id'] = sessionId;
+      h['mcp-protocol-version'] = PROTOCOL_VERSION;
+    }
+    return h;
+  }
+
+  async function rpc<T>(method: string, params?: unknown, notify = false): Promise<T | null> {
+    const reqId = notify ? undefined : ++id;
     const res = await call(config.url, {
       method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        accept: 'application/json, text/event-stream',
-      },
-      body: JSON.stringify({ jsonrpc: '2.0', id: ++id, method, params }),
+      headers: headers(),
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        ...(reqId !== undefined ? { id: reqId } : {}),
+        method,
+        ...(params !== undefined ? { params } : {}),
+      }),
     });
-    if (!res.ok) throw new Error(`docs mcp ${method} failed: ${res.status}`);
+    const sid = res.headers.get('mcp-session-id');
+    if (sid) sessionId = sid;
+    if (!res.ok) throw new DocsMcpError(`docs mcp ${method} failed: ${res.status}`, res.status);
+    if (notify || res.status === 202) return null;
     const body = await res.text();
-    // MCP servers may reply with SSE frames; the JSON-RPC doc rides in `data:`.
-    const line = body.startsWith('event:')
-      ? (body
-          .split('\n')
-          .find((l) => l.startsWith('data:'))
-          ?.slice(5) ?? '')
-      : body;
-    return JSON.parse(line) as T;
+    // MCP servers may reply with SSE frames; the JSON-RPC doc rides in `data:`
+    // lines — one doc per event, with a doc's JSON possibly split across
+    // several `data:` lines in that event.
+    const sse =
+      (res.headers.get('content-type') ?? '').includes('text/event-stream') ||
+      body.startsWith('event:') ||
+      body.startsWith('data:');
+    if (!sse) return JSON.parse(body) as T;
+    const docs = body
+      .split(/\r?\n\r?\n/)
+      .map((block) =>
+        block
+          .split(/\r?\n/)
+          .filter((l) => l.startsWith('data:'))
+          .map((l) => l.slice(5).trimStart())
+          .join('\n'),
+      )
+      .filter(Boolean)
+      .map((d) => JSON.parse(d) as T & { id?: number | string });
+    const match = docs.find((d) => d.id === reqId) ?? (docs.length === 1 ? docs[0] : undefined);
+    if (!match) throw new DocsMcpError(`docs mcp ${method}: no response message`);
+    return match;
+  }
+
+  /** The endpoint is a real MCP server — handshake once, then ride the session. */
+  function ensureInitialized(): Promise<void> {
+    initPromise ??= (async () => {
+      const init = await rpc<JsonRpcResponse>('initialize', {
+        protocolVersion: PROTOCOL_VERSION,
+        capabilities: {},
+        clientInfo: CLIENT_INFO,
+      });
+      if (init?.error) {
+        throw new Error(`docs mcp initialize error ${init.error.code}: ${init.error.message}`);
+      }
+      await rpc('notifications/initialized', undefined, true);
+    })().catch((err) => {
+      initPromise = null;
+      throw err;
+    });
+    return initPromise;
+  }
+
+  /** Run `fn` after the handshake; on a dead session (404) re-initialize and retry once. */
+  async function request<T>(fn: () => Promise<T>): Promise<T> {
+    await ensureInitialized();
+    try {
+      return await fn();
+    } catch (err) {
+      if (!(err instanceof DocsMcpError) || err.status !== 404) throw err;
+      sessionId = undefined;
+      initPromise = null;
+      await ensureInitialized();
+      return fn();
+    }
   }
 
   return {
     async search(query, limit = 5) {
-      const json = await rpc<JsonRpcResponse>('tools/call', {
-        name: 'search',
-        arguments: { query, limit },
-      });
-      const text = toolText(json);
+      const json = await request(() =>
+        rpc<JsonRpcResponse>('tools/call', {
+          name: 'search',
+          arguments: { query, limit },
+        }),
+      );
+      const text = toolText(json ?? {});
       try {
         const parsed = JSON.parse(text) as { results?: DocHit[] } | DocHit[];
         return Array.isArray(parsed) ? parsed : (parsed.results ?? []);

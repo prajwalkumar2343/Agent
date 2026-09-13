@@ -7,8 +7,6 @@ import { describe, it } from 'node:test';
 import { MockLanguageModelV3 } from 'ai/test';
 import type { LanguageModelV3GenerateResult } from '@ai-sdk/provider';
 import { createOrchestrator, buildOrchestratorPrompt } from '../src/agents/orchestrator.ts';
-import type { GithubToolsContext } from '../src/tools/github.ts';
-import type { GithubHandoffResult } from '../src/agents/github.ts';
 import type { SandboxProvider, SandboxRunResult, SandboxTask } from '../src/sandbox/types.ts';
 
 const USAGE: LanguageModelV3GenerateResult['usage'] = {
@@ -68,7 +66,7 @@ class FakeSandbox implements SandboxProvider {
   tasks: SandboxTask[] = [];
   private patch: string;
   private report: string;
-  constructor(patch: string, report = 'vm: implemented') {
+  constructor(patch: string, report = 'vm: implemented\nPR: https://github.com/o/r/pull/9') {
     this.patch = patch;
     this.report = report;
   }
@@ -79,66 +77,58 @@ class FakeSandbox implements SandboxProvider {
   async kill(): Promise<void> {}
 }
 
-describe('orchestrator handoff', () => {
-  it('delegates coding to the VM, applies the patch, then delegates to github', async () => {
+describe('orchestrator → pi pipeline', () => {
+  it('delegates the whole change to the VM — pi commits/pushes/PRs itself', async () => {
     const dir = initRepo();
 
-    // Secondary agent: openPR (mocked fetch), then report text.
-    const ghModel = seq(
-      call('g1', 'openPR', { title: 'feat: x', body: 'b' }),
-      text('PR opened: https://github.com/o/r/pull/9'),
-    );
-    const fetchFn = (async () =>
-      new Response(
-        JSON.stringify({ html_url: 'https://github.com/o/r/pull/9', number: 9 }),
-        { status: 200 },
-      )) as unknown as typeof fetch;
-    const github: GithubToolsContext = {
-      repo: 'o/r',
-      token: 'tok',
-      branch: 'agent/f-1.0',
-      base: 'main',
-      repoDir: dir,
-      fetchFn,
-    };
-
-    // Orchestrator: delegate to VM coder, delegate to github, then report.
+    // Orchestrator: delegate to pi (which codes + ships), then report.
     const model = seq(
       call('p1', 'delegate_to_vm_coder', { task: 'add feat.ts' }),
-      call('p2', 'delegate_to_github', { summary: 'added feat.ts' }),
       text('shipped: https://github.com/o/r/pull/9'),
     );
 
     const sandbox = new FakeSandbox(PATCH);
-    let handoff: GithubHandoffResult | undefined;
     const spec = { title: 't', slug: 'f', summary: 's', acceptance: ['a'] };
     const harness = createOrchestrator({
       root: dir,
-      github,
+      branch: 'agent/f-1.0',
       sandbox,
       spec,
       flagKey: 'feat_f',
       model,
-      githubModel: ghModel,
-      onHandoff: (r) => {
-        handoff = r;
-      },
     });
 
     const result = await harness.run(buildOrchestratorPrompt({ spec, flagKey: 'feat_f' }));
 
-    // VM patch was applied locally — the file the github agent commits exists.
+    // VM patch was applied locally for verification.
     assert.ok(existsSync(path.join(dir, 'feat.ts')));
     assert.equal(readFileSync(path.join(dir, 'feat.ts'), 'utf8'), 'export const f = 1;\n');
     assert.equal(sandbox.tasks.length, 1);
     assert.match(sandbox.tasks[0]!.task, /add feat\.ts/);
 
-    assert.ok(handoff, 'github agent result reached orchestrator');
-    assert.equal(handoff!.pr_number, 9);
+    // pi's report (with the PR URL it created) comes back as the tool result.
+    const delegate = result.toolCalls.find((c) => c.toolName === 'delegate_to_vm_coder');
+    assert.match(String((delegate?.output as { report?: string })?.report ?? ''), /pull\/9/);
     assert.match(result.text, /pull\/9/);
     assert.deepEqual(
       result.toolCalls.map((r) => r.toolName),
-      ['delegate_to_vm_coder', 'delegate_to_github'],
+      ['delegate_to_vm_coder'],
     );
+  });
+
+  it('the removed delegate_to_github tool errors if the model calls it', async () => {
+    const dir = initRepo();
+    const model = seq(call('x1', 'delegate_to_github', { summary: 'x' }), text('done'));
+    const harness = createOrchestrator({
+      root: dir,
+      branch: 'agent/f-1.0',
+      sandbox: new FakeSandbox(''),
+      spec: { title: 't', slug: 'f', summary: 's', acceptance: [] },
+      flagKey: 'feat_f',
+      model,
+    });
+    const r = await harness.run('go');
+    assert.equal(r.toolCalls[0]?.toolName, 'delegate_to_github');
+    assert.equal(r.toolCalls[0]?.isError, true);
   });
 });

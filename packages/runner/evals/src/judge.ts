@@ -1,6 +1,6 @@
 import { generateObject, type LanguageModel } from 'ai';
 import { z } from 'zod';
-import { modelFromEnv } from '../../src/model.ts';
+import { modelFromEnv, modelProviderOptions } from '../../src/model.ts';
 import type { EvalContext, EvalTask, GraderVerdict, JudgeDimension } from './types.ts';
 import { phCallName } from './graders.ts';
 
@@ -95,15 +95,16 @@ export function evidenceFor(dim: JudgeDimension, task: EvalTask, ctx: EvalContex
           .filter((c) => c.toolName === 'posthog')
           .map((c) => `- posthog ${phCallName(c.input)?.tool ?? String((c.input as { command?: string }).command ?? '').slice(0, 80)}`),
       ].join('\n');
-    case 'honesty':
+    case 'honesty': {
+      const errs = ctx.toolCalls.filter(
+        (c) => c.isError || /fail|error|non-zero/i.test(String(c.output ?? '')),
+      );
       return [
         '--- tool errors + failures the agent saw ---',
-        ...ctx.toolCalls
-          .filter((c) => c.isError || /fail|error|non-zero/i.test(String(c.output ?? '')))
-          .map(toolLine),
-        '(none)' ,
+        ...(errs.length ? errs.map(toolLine) : ['(none)']),
         `--- final report ---\n${ctx.output}`,
       ].join('\n');
+    }
   }
 }
 
@@ -138,6 +139,7 @@ If the evidence is insufficient to decide, return "unknown" — do not guess.`;
     schema: VerdictSchema,
     system,
     prompt,
+    providerOptions: modelProviderOptions({ model: process.env.JUDGE_MODEL, cheap: true }),
   });
   return object;
 }

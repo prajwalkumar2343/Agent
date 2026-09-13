@@ -8,12 +8,14 @@ import type { Run, RunState } from '../../shared/src/index.ts';
  *                        ↺ CI red    ↘ rolled_back   ↘ failed (any state)
  *
  * `checked → build` is the exists=false shortcut (skip evidence).
+ * `checked → done` exits early when the shipped-feature index (features.md)
+ * already covers the idea — the requester is told, nothing is built.
  * `await_ci → await_rollout` is the CI-red path (PM asked to iterate).
  */
 const EDGES: Record<RunState, RunState[]> = {
   received: ['spec'],
   spec: ['checked'],
-  checked: ['evidence', 'build'],
+  checked: ['evidence', 'build', 'done'],
   evidence: ['build'],
   build: ['reported'],
   reported: ['await_rollout'],
@@ -29,7 +31,8 @@ const EDGES: Record<RunState, RunState[]> = {
 const TERMINAL: ReadonlySet<RunState> = new Set(['done', 'rolled_back', 'failed']);
 
 export function canTransition(from: RunState, to: RunState): boolean {
-  return to === 'failed' || EDGES[from].includes(to);
+  if (from === to) return false;
+  return (to === 'failed' && !isTerminal(from)) || (EDGES[from] ?? []).includes(to);
 }
 
 export function isTerminal(state: RunState): boolean {

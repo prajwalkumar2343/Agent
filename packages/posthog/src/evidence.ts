@@ -8,8 +8,17 @@ import type { PostHogMcp } from './mcp.ts';
  *  - collectEvidence    — the `evidence` state's related-events + sessions pull
  */
 
-/** execute-sql returns {columns, results: [[...]]} — be tolerant about row shape. */
+/**
+ * execute-sql answers in two shapes: {columns, results: [[...]]} JSON (or a
+ * bare row array) and — the hosted MCP server's actual text format — pipe-
+ * delimited lines: a header row, then one `a|b|c` line per row.
+ */
 export function sqlRows(payload: unknown): unknown[][] {
+  if (typeof payload === 'string') {
+    const lines = payload.split(/\r?\n/).filter((l) => l.length > 0);
+    if (lines.length < 2) return [];
+    return lines.slice(1).map((l) => l.split('|'));
+  }
   if (Array.isArray(payload)) return payload.filter(Array.isArray);
   if (!payload || typeof payload !== 'object') return [];
   const o = payload as Record<string, unknown>;
@@ -43,15 +52,27 @@ export function specKeywords(input: Spec | string[] | string): string[] {
       ? input
       : [input.title, input.summary, ...(input.acceptance ?? [])].join(' ');
   const seen = new Set<string>();
-  for (const w of text.toLowerCase().split(/[^a-z0-9]+/)) {
-    if (w.length >= 4 && !STOP_WORDS.has(w)) seen.add(w);
+  const words = text
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter((w) => w.length > 0 && !STOP_WORDS.has(w));
+  for (const w of words) {
+    if (w.length >= 4) seen.add(w);
     if (seen.size >= 12) break;
+  }
+  // Adjacent non-stop-word pairs/triples ride alongside the singles so a
+  // multi-word name ("signed up") reaches matchEvents as one phrase keyword —
+  // every token must be present in the event name for it to match.
+  for (const n of [2, 3]) {
+    for (let i = 0; i + n <= words.length && seen.size < 24; i++) {
+      seen.add(words.slice(i, i + n).join(' '));
+    }
   }
   return [...seen];
 }
 
-/** Fold snake_case/kebab/$ prefixes away so "signed up" matches `user_signed_up`. */
-const squash = (s: string): string => s.toLowerCase().replace(/[^a-z0-9]/g, '');
+/** Split into lowercase alphanumeric tokens — `user_signed_up` → {user, signed, up}. */
+const tokens = (s: string): string[] => s.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
 
 export interface EventCount {
   name: string;
@@ -75,11 +96,16 @@ export async function listEventCounts(
     .filter((e) => e.name);
 }
 
+/**
+ * Whole-token matching only — keyword "card" must equal an event token, so it
+ * no longer matches `discard`. A multi-word keyword matches when every one of
+ * its tokens appears in the event name ("signed up" → user_signed_up).
+ */
 export function matchEvents(counts: EventCount[], keywords: string[]): EventCount[] {
-  const keys = keywords.map(squash).filter(Boolean);
+  const keys = keywords.map(tokens).filter((t) => t.length > 0);
   return counts.filter((e) => {
-    const name = squash(e.name);
-    return keys.some((k) => name.includes(k) || k.includes(name));
+    const words = new Set(tokens(e.name));
+    return keys.some((k) => k.every((w) => words.has(w)));
   });
 }
 
@@ -107,13 +133,14 @@ const sqlString = (s: string): string => `'${s.replace(/'/g, "''")}'`;
 /**
  * Evidence for the build step: which existing events orbit this feature, how
  * often they fire, and which sessions to replay. Deterministic — no LLM in the
- * loop; the coding agent gets this as EVIDENCE_JSON.
+ * loop; the coding agent gets this as EVIDENCE_JSON. The window is fixed at
+ * 30 days — the shared Evidence type names the field `count_30d`.
  */
 export async function collectEvidence(
   client: PostHogMcp,
   spec: Spec,
-  days = 30,
 ): Promise<Evidence> {
+  const days = 30;
   const counts = await listEventCounts(client, days);
   const matched = matchEvents(counts, specKeywords(spec));
   const related = (matched.length ? matched : counts.slice(0, 5))

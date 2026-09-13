@@ -14,6 +14,7 @@ oauth_config:
     bot:
       - app_mentions:read
       - chat:write
+      - channels:history
       - im:write
       - im:history
       - users:read
@@ -22,6 +23,7 @@ settings:
     request_url: https://YOUR-APP.vercel.app/api/slack/events
     bot_events:
       - app_mention
+      - message.channels
       - message.im
   interactivity:
     is_enabled: true

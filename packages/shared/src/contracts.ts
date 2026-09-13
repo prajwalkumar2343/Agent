@@ -21,10 +21,25 @@ export interface FeatureRunInputs {
   callback_url: string;
 }
 
+/**
+ * POST /api/deploy/users — internal (x-run-secret). `users` = target cohort
+ * size (0 undeploys); `seed` asks the app to top up demo users first (only
+ * honored with DEPLOY_ALLOW_SEED=1). `thread_ts` binds the call to a run —
+ * when the run exists its flag_key must match.
+ */
+export interface DeployUsersPayload {
+  flag_key: string;
+  users: number;
+  thread_ts?: string;
+  seed?: boolean;
+}
+
 export const ACTION = {
   ROLLOUT_CONFIRM: 'rollout_confirm',
   ROLLOUT_CANCEL: 'rollout_cancel',
   ROLLBACK_CONFIRM: 'rollback_confirm',
+  /** User-count deploy (Postgres cohort) — button value carries the count. */
+  DEPLOY_CONFIRM: 'deploy_confirm',
 } as const;
 export type ActionId = (typeof ACTION)[keyof typeof ACTION];
 
@@ -37,5 +52,7 @@ export function slugify(s: string): string {
 }
 
 export function flagKeyFor(slug: string): string {
-  return `feat_${slugify(slug).replace(/-/g, '_')}`.slice(0, 48);
+  const key = slugify(slug).replace(/-/g, '_');
+  if (!key) throw new Error(`cannot build flag key from slug: ${slug}`);
+  return `feat_${key}`.slice(0, 48);
 }

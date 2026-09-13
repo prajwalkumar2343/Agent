@@ -2,8 +2,16 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import type { ToolSet } from 'ai';
 import { posthogTools } from '../src/tools/posthog.ts';
+import { mapVault, secretRef } from '../../shared/src/vault.ts';
 
 const OPTS = { toolCallId: 't1', messages: [] };
+
+/** Config carrying a vault keyword — never the key value. */
+const cfg = (key: string, fetchFn: typeof fetch) => ({
+  apiKeyRef: secretRef('POSTHOG_API_KEY'),
+  vault: mapVault({ POSTHOG_API_KEY: key }),
+  fetchFn,
+});
 
 const TOOLS = [
   { name: 'execute-sql', description: 'Execute an SQL query.', inputSchema: { type: 'object', properties: { query: { type: 'string' } } } },
@@ -49,19 +57,19 @@ async function exec(tools: ToolSet, command: string): Promise<string> {
 
 describe('posthog tool (MCP dispatcher)', () => {
   it('exposes a single `posthog` tool', () => {
-    const tools = posthogTools({ apiKey: 'k', fetchFn: fakeFetch() });
+    const tools = posthogTools(cfg('k', fakeFetch()));
     assert.deepEqual(Object.keys(tools), ['posthog']);
   });
 
   it('`tools` lists the session tools', async () => {
-    const out = await exec(posthogTools({ apiKey: 'k', fetchFn: fakeFetch() }), 'tools');
+    const out = await exec(posthogTools(cfg('k', fakeFetch())), 'tools');
     assert.match(out, /execute-sql/);
     assert.match(out, /create-feature-flag/);
   });
 
   it('`search` filters by name and description', async () => {
     const out = await exec(
-      posthogTools({ apiKey: 'k', fetchFn: fakeFetch() }),
+      posthogTools(cfg('k', fakeFetch())),
       'search flag',
     );
     assert.match(out, /feature-flag-get-all/);
@@ -70,7 +78,7 @@ describe('posthog tool (MCP dispatcher)', () => {
 
   it('`info` returns the input schema', async () => {
     const out = await exec(
-      posthogTools({ apiKey: 'k', fetchFn: fakeFetch() }),
+      posthogTools(cfg('k', fakeFetch())),
       'info execute-sql',
     );
     assert.match(out, /"query"/);
@@ -78,7 +86,7 @@ describe('posthog tool (MCP dispatcher)', () => {
 
   it('`schema` drills into a schema field', async () => {
     const out = await exec(
-      posthogTools({ apiKey: 'k', fetchFn: fakeFetch() }),
+      posthogTools(cfg('k', fakeFetch())),
       'schema execute-sql query',
     );
     assert.match(out, /"type": "string"/);
@@ -87,7 +95,7 @@ describe('posthog tool (MCP dispatcher)', () => {
   it('`call` invokes the tool and returns parsed output', async () => {
     const calls: [string, Record<string, unknown>][] = [];
     const out = await exec(
-      posthogTools({ apiKey: 'k', fetchFn: fakeFetch(calls) }),
+      posthogTools(cfg('k', fakeFetch(calls))),
       'call execute-sql {"query":"SELECT 1"}',
     );
     assert.deepEqual(calls, [['execute-sql', { query: 'SELECT 1' }]]);
@@ -96,14 +104,14 @@ describe('posthog tool (MCP dispatcher)', () => {
 
   it('denies destructive tools', async () => {
     const out = await exec(
-      posthogTools({ apiKey: 'k', fetchFn: fakeFetch() }),
+      posthogTools(cfg('k', fakeFetch())),
       'call delete-feature-flag {"id":1}',
     );
     assert.match(out, /disabled/);
   });
 
   it('rejects unknown tools and bad JSON without throwing', async () => {
-    const tools = posthogTools({ apiKey: 'k', fetchFn: fakeFetch() });
+    const tools = posthogTools(cfg('k', fakeFetch()));
     assert.match(await exec(tools, 'call nope {}'), /unknown tool/);
     assert.match(await exec(tools, 'call execute-sql {bad'), /invalid JSON/);
     assert.match(await exec(tools, 'bogus'), /commands:/);

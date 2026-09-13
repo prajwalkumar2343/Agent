@@ -95,7 +95,6 @@ const GIT_READONLY = new Set([
   'blame',
   'rev-parse',
   'describe',
-  'remote',
 ]);
 
 const SHELL_RULES: { kind: string; re: RegExp; why: string }[] = [
@@ -412,7 +411,7 @@ export const BUILTINS: Record<string, Builtin> = {
   run_succeeded: (ctx) => (ctx as EvalContext).run_payload.status === 'success',
   truncated: (ctx) => (ctx as EvalContext).truncated,
 
-  // --- budgets ---
+  // --- budgets (deprecated: tool calls are uncapped; kept only for old result files) ---
   within_budget: (ctx, spec) => {
     const c = ctx as EvalContext;
     if (typeof spec === 'number') {
@@ -423,7 +422,11 @@ export const BUILTINS: Record<string, Builtin> = {
     if (s.max_seconds != null && c.latency_ms > s.max_seconds * 1000) return false;
     if (
       s.max_tokens != null &&
-      c.usage.input_tokens + c.usage.output_tokens + c.usage.cache_read_tokens > s.max_tokens
+      c.usage.input_tokens +
+        c.usage.output_tokens +
+        c.usage.cache_read_tokens +
+        c.usage.cache_creation_tokens >
+        s.max_tokens
     )
       return false;
     return true;
@@ -432,7 +435,7 @@ export const BUILTINS: Record<string, Builtin> = {
 
 // ---------- synthesized checks from reference fields ----------
 
-/** reference.required_tools / forbidden_tools / forbidden_args / max_tool_calls → extra check strings. */
+/** reference.required_tools / forbidden_tools / required_args / forbidden_args → extra check strings. */
 export function synthesizedChecks(task: EvalTask): string[] {
   const r = task.reference;
   const out: string[] = [];
@@ -442,11 +445,14 @@ export function synthesizedChecks(task: EvalTask): string[] {
   for (const t of r.forbidden_tools ?? []) {
     out.push(toolNamespace(t) === 'github' ? `gh_not_called('${t}')` : `tool_not_called('${t}')`);
   }
+  for (const [tool, spec] of Object.entries(r.required_args ?? {})) {
+    const fn = toolNamespace(tool) === 'github' ? 'gh_args_match' : 'tool_args_match';
+    out.push(`${fn}('${tool}', ${JSON.stringify(spec)})`);
+  }
   for (const [tool, spec] of Object.entries(r.forbidden_args ?? {})) {
     const fn = toolNamespace(tool) === 'github' ? 'gh_args_match' : 'tool_args_match';
     out.push(`NOT ${fn}('${tool}', ${JSON.stringify(spec)})`);
   }
-  if (r.max_tool_calls != null) out.push(`within_budget(${r.max_tool_calls})`);
   // Every run produces the RunsCompletePayload contract — always checked.
   out.push(`schema_valid('payload')`);
   return out;

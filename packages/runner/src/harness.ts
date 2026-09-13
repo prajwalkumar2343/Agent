@@ -10,6 +10,7 @@ import {
   type StopCondition,
   type ToolSet,
 } from 'ai';
+import type { SharedV3ProviderOptions } from '@ai-sdk/provider';
 import { createTraceRecorder } from './trace.ts';
 
 export interface ToolCallRecord {
@@ -57,6 +58,8 @@ export interface HarnessOptions {
   abortSignal?: AbortSignal;
   /** Passed through to the model call (temperature, maxOutputTokens, ...). */
   settings?: Omit<CallSettings, 'abortSignal'>;
+  /** Provider-specific options for the model call (e.g. openai reasoningEffort). */
+  providerOptions?: SharedV3ProviderOptions;
   /**
    * Trace metadata — when set, the harness times every tool execution and
    * model step and attaches an AgentTrace (see trace.ts) to the result.
@@ -98,6 +101,7 @@ export function createHarness(options: HarnessOptions): Harness {
     onToolCall,
     abortSignal,
     settings,
+    providerOptions,
     trace,
   } = options;
   const log = options.logger === null ? () => {} : (options.logger ?? defaultLogger);
@@ -116,6 +120,7 @@ export function createHarness(options: HarnessOptions): Harness {
         ...(Array.isArray(stopWhen) ? stopWhen : stopWhen ? [stopWhen] : []),
       ],
       abortSignal,
+      ...(providerOptions ? { providerOptions } : {}),
       ...(settings ?? {}),
       ...(prepareStep ? { prepareStep } : {}),
       onStepFinish(step) {

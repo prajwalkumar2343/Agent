@@ -7,6 +7,7 @@ import { promisify } from 'node:util';
 import {
   GIT_SEALED_ENV,
   collectPatchScript,
+  configureRemoteScript,
   sanitizeRepoScript,
   sandboxTaskPrompt,
   type SandboxProvider,
@@ -14,6 +15,11 @@ import {
   type SandboxRunResult,
   type SandboxTask,
 } from './types.ts';
+import {
+  envVault,
+  resolveSecrets,
+  type SecretVault,
+} from '../../../shared/src/vault.ts';
 
 const execFileAsync = promisify(execFile);
 
@@ -30,9 +36,11 @@ export class LocalSandboxProvider implements SandboxProvider {
   private dir: string | null = null;
   private shipped = false;
   private o: SandboxProviderOptions;
+  private vault: SecretVault;
 
   constructor(o: SandboxProviderOptions) {
     this.o = o;
+    this.vault = o.vault ?? envVault();
   }
 
   private repoDir(): string {
@@ -61,7 +69,13 @@ export class LocalSandboxProvider implements SandboxProvider {
       recursive: true,
       filter: (src) => !SKIP_DIRS.includes(path.basename(src)),
     });
-    await execFileAsync('bash', ['-c', sanitizeRepoScript(repo)]);
+    await execFileAsync('bash', [
+      '-c',
+      [
+        sanitizeRepoScript(repo),
+        ...(this.o.git ? [configureRemoteScript(this.o.git, repo)] : []),
+      ].join('\n'),
+    ]);
     const { stdout } = await execFileAsync('git', ['-C', repo, 'rev-parse', 'HEAD']);
     await writeFile(path.join(this.dir!, 'base.sha'), stdout.trim());
     this.shipped = true;
@@ -72,14 +86,15 @@ export class LocalSandboxProvider implements SandboxProvider {
     if (!this.shipped) await this.ship();
     const dir = this.dir!;
 
-    const prompt = sandboxTaskPrompt(req.task, path.join(dir, 'report.md'));
+    const prompt = sandboxTaskPrompt(req.task, path.join(dir, 'report.md'), this.o.git);
     await writeFile(path.join(dir, 'task.md'), prompt);
 
     const env = {
       PATH: process.env.PATH ?? '',
       HOME: process.env.HOME ?? '',
       ...GIT_SEALED_ENV,
-      ...this.o.env,
+      // Vault keywords materialize here, into the spawned process only.
+      ...resolveSecrets(this.o.envRefs, this.vault),
     };
     const eventsPath = path.join(dir, 'events.jsonl');
     let exitCode = 0;
@@ -104,9 +119,9 @@ export class LocalSandboxProvider implements SandboxProvider {
     }
 
     // Always collect the diff — a crashed pi may still have left edits.
-    const collect = collectPatchScript()
-      .replaceAll('/home/user/agent', dir);
-    await execFileAsync('bash', ['-c', collect], { cwd: this.repoDir() });
+    await execFileAsync('bash', ['-c', collectPatchScript(dir)], {
+      cwd: this.repoDir(),
+    });
 
     const [patch, report, eventsJsonl] = await Promise.all([
       readFile(path.join(dir, 'patch.diff'), 'utf8').catch(() => ''),
@@ -125,5 +140,6 @@ export class LocalSandboxProvider implements SandboxProvider {
   async kill(): Promise<void> {
     if (this.dir) await rm(this.dir, { recursive: true, force: true }).catch(() => {});
     this.dir = null;
+    this.shipped = false;
   }
 }

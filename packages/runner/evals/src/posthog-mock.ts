@@ -1,4 +1,5 @@
 import type { PostHogMcpConfig } from '../../../posthog/src/mcp.ts';
+import { mapVault, secretRef } from '../../../shared/src/vault.ts';
 
 /**
  * Mock PostHog MCP server for evals. Speaks just enough streamable-HTTP
@@ -92,7 +93,9 @@ export function mockPostHog(opts: { existingFlags?: Record<string, number> } = {
         switch (name) {
           case 'execute-sql':
             sql_queries.push(String(args.query ?? ''));
-            return reply(toolResult({ columns: ['event', 'c'], results: [] }));
+            // Match the hosted server: execute-sql answers pipe-delimited
+            // text (header line, then one a|b line per row), not JSON.
+            return reply(toolResult('event|c'));
           case 'feature-flag-get-definition-by-key': {
             const f = flags[String(args.key)];
             return reply(toolResult(f ?? { error: 'not found' }, !f));
@@ -104,6 +107,10 @@ export function mockPostHog(opts: { existingFlags?: Record<string, number> } = {
           }
           case 'create-feature-flag': {
             const key = String(args.key ?? '');
+            // The real API rejects duplicate keys — never silently overwrite.
+            if (flags[key]) {
+              return reply(toolResult({ error: `feature flag with key "${key}" already exists` }, true));
+            }
             const pct =
               (args.filters as { groups?: { rollout_percentage?: number }[] })?.groups?.[0]
                 ?.rollout_percentage ?? 0;
@@ -142,7 +149,12 @@ export function mockPostHog(opts: { existingFlags?: Record<string, number> } = {
   }) as unknown as typeof fetch;
 
   return {
-    config: { apiKey: 'phx_eval', url: 'https://mcp.posthog.test/mcp', fetchFn },
+    config: {
+      apiKeyRef: secretRef('POSTHOG_API_KEY'),
+      vault: mapVault({ POSTHOG_API_KEY: 'phx_eval' }),
+      url: 'https://mcp.posthog.test/mcp',
+      fetchFn,
+    },
     calls,
     state: () => ({ calls, flags, sql_queries }),
   };

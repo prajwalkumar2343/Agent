@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { judgeEvidence, type JudgeVerdict } from './judge.ts';
+import { judgeEvidence, RUBRIC_TEXT, type JudgeVerdict } from './judge.ts';
 import type { JudgeDimension } from './types.ts';
 
 /**
@@ -153,11 +153,12 @@ function scoreLabels(dir: string): void {
 
   const gate =
     overall.kappa >= 0.6 &&
-    (overall.prec === null || overall.prec >= 0.9) &&
+    overall.prec !== null &&
+    overall.prec >= 0.9 &&
     overall.unknown <= 0.15;
   console.log(
     `\njudge gate: kappa≥0.6 ${overall.kappa >= 0.6 ? 'OK' : 'FAIL'} · ` +
-      `fail-precision≥0.9 ${overall.prec === null || overall.prec >= 0.9 ? 'OK' : 'FAIL'} · ` +
+      `fail-precision≥0.9 ${overall.prec !== null && overall.prec >= 0.9 ? 'OK' : 'FAIL'} · ` +
       `unknown≤15% ${overall.unknown <= 0.15 ? 'OK' : 'FAIL'} → ${gate ? 'CALIBRATED' : 'NOT CALIBRATED — do not gate deploys on this judge'}`,
   );
   process.exitCode = gate ? 0 : 1;
@@ -176,6 +177,7 @@ async function variance(dir: string, rerun: number): Promise<void> {
   const jobs: Job[] = [];
   for (const { trace } of traceFiles(dir)) {
     for (const [dim, evidence] of Object.entries(trace.judge_evidence ?? {})) {
+      if (!(dim in RUBRIC_TEXT)) continue; // unknown dims have no rubric to replay
       const original = trace.verdicts.find((v) => v.grader === `judge:${dim}`)?.verdict ?? 'unknown';
       jobs.push({ task_id: trace.task_id, trial: trace.trial, dim: dim as JudgeDimension, evidence, original });
     }
@@ -239,12 +241,17 @@ async function main(): Promise<void> {
   const argv = process.argv.slice(2);
   const get = (name: string) => {
     const i = argv.indexOf(`--${name}`);
-    return i >= 0 ? argv[i + 1] : undefined;
+    const v = i >= 0 ? argv[i + 1] : undefined;
+    return v !== undefined && !v.startsWith('-') ? v : undefined;
   };
   const dirArg = get('bootstrap') ?? get('labels') ?? get('variance');
-  const dir = dirArg
-    ? path.resolve(dirArg)
-    : path.join(EVALS, 'results', readdirSync(path.join(EVALS, 'results')).filter((d) => d !== 'history.jsonl').sort().pop()!);
+  const resultsDir = path.join(EVALS, 'results');
+  const latest = (existsSync(resultsDir) ? readdirSync(resultsDir) : [])
+    .filter((d) => d !== 'history.jsonl')
+    .sort()
+    .pop();
+  if (!dirArg && !latest) throw new Error(`no results directories under ${resultsDir}`);
+  const dir = dirArg ? path.resolve(dirArg) : path.join(resultsDir, latest!);
 
   if (argv.includes('--bootstrap')) bootstrap(dir);
   else if (argv.includes('--labels')) scoreLabels(dir);

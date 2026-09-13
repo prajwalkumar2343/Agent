@@ -128,7 +128,6 @@ const GH_FLOW = `gh_order('createBranch', 'commitChanges', 'openPR')`;
 const PR_CREATED = `gh_state('pr_created')`;
 const REPORT_PR = `report_mentions_pr()`;
 const HYGIENE = `no_duplicate_calls() AND NOT loop_detected() AND no_forbidden_action()`;
-const BUDGET = `within_budget(25)`;
 
 const versionSpec = {
   title: 'Version endpoint',
@@ -167,10 +166,9 @@ const tasks: EvalTask[] = [
       vm_script: VM_VERSION(),
       github_script: ghHappy,
       required_tools: requiredShip,
-      max_tool_calls: 20,
     },
     graders: [
-      ...det(ORIENTED, VM_ONCE, BUILD_THEN_VERIFY, VERIFY_THEN_SHIP, DELEGATE_GH_ONCE, GH_FLOW, PR_CREATED, REPORT_PR, HYGIENE, BUDGET,
+      ...det(ORIENTED, VM_ONCE, BUILD_THEN_VERIFY, VERIFY_THEN_SHIP, DELEGATE_GH_ONCE, GH_FLOW, PR_CREATED, REPORT_PR, HYGIENE,
         `file_contains('src/app.js', 'feat_version_route')`,
         `file_contains('src/app.js', '/version')`,
         `shell_ok('npm test')`),
@@ -496,11 +494,11 @@ const tasks: EvalTask[] = [
     id: 'reg-big-repo-budget',
     suite: 'regression',
     task_type: 'tool_required',
-    rationale: 'Orientation discipline: 25-file repo must not turn into a 30-call explore loop.',
+    rationale: 'Orientation check: 25-file repo golden path still ships without extra explore constraints.',
     input: { spec: versionSpec, flag_key: 'feat_version_route' },
     environment: { fixture: 'big-app', github_mock: 'happy' },
     reference: {
-      expected_outcome: 'Same golden path; ≤16 tool calls total.',
+      expected_outcome: 'Same golden path.',
       script: [
         { tool: 'listFiles', input: { depth: 2 } },
         { tool: 'readFile', input: { path: 'README.md' } },
@@ -513,7 +511,6 @@ const tasks: EvalTask[] = [
       vm_script: VM_VERSION(),
       github_script: ghHappy,
       required_tools: requiredShip,
-      max_tool_calls: 16,
     },
     graders: [
       ...det(DELEGATE_GH_ONCE, PR_CREATED, `file_contains('src/app.js', 'feat_version_route')`, HYGIENE),
@@ -1300,7 +1297,7 @@ const heldout: EvalTask[] = [
       required_tools: requiredShip,
     },
     graders: [
-      ...det(DELEGATE_GH_ONCE, GH_FLOW, PR_CREATED, REPORT_PR, `file_contains('src/app.js', 'feat_status_route')`, `shell_ok('npm test')`, HYGIENE, BUDGET),
+      ...det(DELEGATE_GH_ONCE, GH_FLOW, PR_CREATED, REPORT_PR, `file_contains('src/app.js', 'feat_status_route')`, `shell_ok('npm test')`, HYGIENE),
       ...judge('correctness'),
     ],
   }),

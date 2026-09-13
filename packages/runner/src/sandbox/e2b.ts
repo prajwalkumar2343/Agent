@@ -8,13 +8,20 @@ import {
   GIT_SEALED_ENV,
   SBX,
   collectPatchScript,
+  configureRemoteScript,
   sanitizeRepoScript,
   sandboxTaskPrompt,
+  shQuote,
   type SandboxProvider,
   type SandboxProviderOptions,
   type SandboxRunResult,
   type SandboxTask,
 } from './types.ts';
+import {
+  envVault,
+  resolveSecrets,
+  type SecretVault,
+} from '../../../shared/src/vault.ts';
 
 const execFileAsync = promisify(execFile);
 
@@ -28,18 +35,22 @@ type E2BSandbox = import('e2b').Sandbox;
 
 /**
  * E2B provider — the pi coding agent runs in a Firecracker microVM. The
- * product repo is shipped once as a tarball (`.git` included — no token
- * leaves the Actions job), pi edits it, and the cumulative diff comes back
- * as a patch the orchestrator applies locally.
+ * product repo is shipped once as a tarball (`.git` included — the PAT
+ * never lands in `.git/config`; it crosses as `GH_TOKEN` in pi's env and
+ * the credential helper reads it at push time). pi edits, commits, pushes
+ * the fixed feature branch, and opens the PR itself; the cumulative diff
+ * still comes back as a patch the orchestrator verifies locally.
  */
 export class E2BSandboxProvider implements SandboxProvider {
   readonly name = 'e2b';
   private sbx: E2BSandbox | null = null;
   private shipped = false;
   private o: SandboxProviderOptions;
+  private vault: SecretVault;
 
   constructor(o: SandboxProviderOptions) {
     this.o = o;
+    this.vault = o.vault ?? envVault();
   }
 
   private async ensure(): Promise<E2BSandbox> {
@@ -98,6 +109,7 @@ export class E2BSandboxProvider implements SandboxProvider {
         `mkdir -p ${SBX.repo}`,
         `tar -xzf ${SBX.tarball} -C ${SBX.repo}`,
         sanitizeRepoScript(),
+        ...(this.o.git ? [configureRemoteScript(this.o.git)] : []),
         `git -C ${SBX.repo} rev-parse HEAD > ${SBX.baseShaFile}`,
       ].join('\n'),
     );
@@ -116,7 +128,9 @@ export class E2BSandboxProvider implements SandboxProvider {
           PATH: `${SBX.dir}/node/bin:/usr/local/bin:/usr/bin:/bin`,
           HOME: '/home/user',
           ...GIT_SEALED_ENV,
-          ...this.o.env,
+          // Vault keywords materialize here, into the spawned command only —
+          // the resolved map never lands on provider state.
+          ...resolveSecrets(this.o.envRefs, this.vault),
         },
         timeoutMs: opts.timeoutMs ?? 120_000,
       });
@@ -134,13 +148,13 @@ export class E2BSandboxProvider implements SandboxProvider {
     const sbx = await this.ensure();
     if (!this.shipped) await this.ship(sbx);
 
-    await sbx.files.write(SBX.taskFile, sandboxTaskPrompt(req.task));
+    await sbx.files.write(SBX.taskFile, sandboxTaskPrompt(req.task, SBX.reportFile, this.o.git));
     const pi = await this.run(
       sbx,
       [
         `pi --mode json --no-session`,
         `  --no-extensions --no-skills --no-prompt-templates --no-themes --no-context-files`,
-        `  --provider ${this.o.pi.provider} --model ${this.o.pi.model}`,
+        `  --provider ${shQuote(this.o.pi.provider)} --model ${shQuote(this.o.pi.model)}`,
         `  -p "$(cat ${SBX.taskFile})" > ${SBX.eventsFile} 2>${SBX.dir}/pi.stderr`,
       ].join(' \\\n'),
       { timeoutMs: req.timeoutMs ?? 900_000, cwd: SBX.repo },
@@ -187,5 +201,6 @@ export class E2BSandboxProvider implements SandboxProvider {
   async kill(): Promise<void> {
     await this.sbx?.kill().catch(() => {});
     this.sbx = null;
+    this.shipped = false;
   }
 }

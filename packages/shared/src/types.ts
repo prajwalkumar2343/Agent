@@ -13,6 +13,11 @@ export interface FeatureCheck {
   reason: string;
   docs: { searched: boolean; pages: string[]; hits: string[] };
   events: { searched: boolean; matched: string[] };
+  /**
+   * Shipped-feature index (features.md) — the authoritative "already exists"
+   * signal. Optional: runs stored before the index existed don't have it.
+   */
+  index?: { searched: boolean; hits: string[] };
 }
 
 export interface Evidence {
@@ -47,8 +52,11 @@ export interface Run {
   pr_url?: string;
   pr_number?: number;
   sim_report?: SimReport;
-  pending_rollout?: { pct: number; confirmed_by: string };
+  /** Exactly one of pct (PostHog % rollout) / users (Postgres cohort) is set. */
+  pending_rollout?: { pct?: number; users?: number; confirmed_by: string };
   rollout_pct?: number;
+  /** Postgres cohort size once a user-count deploy lands (see packages/deploy). */
+  rollout_users?: number;
   report_schedule: number[];
   fired_reports: number[];
   created_at: number;

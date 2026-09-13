@@ -39,16 +39,17 @@ async function sweepRun(store: RunStore, run: Run, now: number): Promise<number>
   for (const t of due) {
     const label = run.report_schedule.indexOf(t);
     await postToThread(run.channel, run.thread_ts, `Report #${label + 1} — ${await metricLine(run)}`);
+    // Record each report as soon as it posts — a mid-loop failure must not
+    // make the next sweep repost the ones that already went out.
+    await store.update(run.thread_ts, (r) => {
+      const fired_reports = [...r.fired_reports, t];
+      if (r.report_schedule.length > 0 && fired_reports.length >= r.report_schedule.length) {
+        return advance(r, 'done', { fired_reports });
+      }
+      const patched = { ...r, fired_reports, updated_at: now };
+      return r.state === 'live' ? advance(patched, 'monitor') : patched;
+    });
   }
-  if (due.length === 0) return 0;
-  await store.update(run.thread_ts, (r) => {
-    const fired_reports = [...r.fired_reports, ...due];
-    if (r.report_schedule.length > 0 && fired_reports.length >= r.report_schedule.length) {
-      return advance(r, 'done', { fired_reports });
-    }
-    const patched = { ...r, fired_reports, updated_at: now };
-    return r.state === 'live' ? advance(patched, 'monitor') : patched;
-  });
   return due.length;
 }
 

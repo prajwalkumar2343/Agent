@@ -103,7 +103,8 @@ function main(): void {
   const argv = process.argv.slice(2);
   const get = (n: string) => {
     const i = argv.indexOf(`--${n}`);
-    return i >= 0 ? argv[i + 1]! : undefined;
+    const v = i >= 0 ? argv[i + 1] : undefined;
+    return v !== undefined && !v.startsWith('-') ? v : undefined;
   };
   const tracesDir = path.resolve(get('traces') ?? process.env.TRACE_DIR ?? path.join(ONLINE, 'traces'));
   if (!existsSync(tracesDir)) {

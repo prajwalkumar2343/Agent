@@ -30,6 +30,22 @@ function asFlags(payload: unknown): FeatureFlag[] {
 }
 
 /**
+ * Only "flag missing" or "resolver tool unavailable" may fall back to the
+ * list search — auth failures, 5xx and network errors must surface. A bare
+ * "not found" isn't enough on its own: the message has to name the flag,
+ * the tool or the method, or carry a real 404 status.
+ */
+function isFlagLookupMiss(err: unknown): boolean {
+  const status = (err as { status?: unknown }).status;
+  if (typeof status === 'number') return status === 404;
+  const msg = err instanceof Error ? err.message : String(err);
+  const notFound = /\b404\b|not[ _-]?found|no such|does not exist|could not find|cannot find/i.test(msg);
+  const context = /flag|tool|method/i.test(msg);
+  const resolver = /unknown (tool|method)|method not found|no .{0,20}(flag|tool)\b/i.test(msg);
+  return (notFound && context) || resolver;
+}
+
+/**
  * Resolve a flag by its stable key (`feat_*`). Flag keys are derived
  * deterministically (see flagKeyFor in shared) so this is the only lookup the
  * pipeline needs. Prefers the by-key resolver (≤5 candidates), falls back to
@@ -39,8 +55,9 @@ export async function findFlagByKey(client: PostHogMcp, key: string): Promise<Fe
   let candidates: FeatureFlag[] = [];
   try {
     candidates = asFlags(await client.callTool('feature-flag-get-definition-by-key', { key }));
-  } catch {
-    // resolver unavailable or errored — the list search below still covers us
+  } catch (err) {
+    if (!isFlagLookupMiss(err)) throw err;
+    // flag missing or resolver unavailable — the list search below still covers us
   }
   let flag = candidates.find((f) => f.key === key);
   if (!flag) {
@@ -55,7 +72,10 @@ export async function findFlagByKey(client: PostHogMcp, key: string): Promise<Fe
  * Set a flag's rollout percentage — the one mutation the pipeline performs
  * (rollout to pct on merge, 0 on rollback). update-feature-flag replaces
  * `filters` wholesale, so the flag's existing groups are patched in place:
- * every group gets the same pct, targeting properties stay untouched.
+ * every group gets the same pct, targeting properties stay untouched. A pct
+ * above 0 also activates the flag (new flags are created inactive); a
+ * rollback to 0 leaves `active` alone — a 0% flag already evaluates false
+ * for everyone without being disabled.
  */
 export async function setRolloutPercentage(
   client: PostHogMcp,
@@ -72,7 +92,7 @@ export async function setRolloutPercentage(
   await client.callTool('update-feature-flag', {
     id: flag.id,
     filters: { ...(flag.filters ?? {}), groups: patched },
-    active: pct > 0,
+    ...(pct > 0 ? { active: true } : {}),
   });
 }
 
@@ -95,5 +115,8 @@ export async function ensureFeatureFlag(
       filters: { groups: [{ properties: [], rollout_percentage: 0 }] },
     }),
   )[0];
-  return { flag: created ?? { id: -1, key, active: false }, created: true };
+  if (!created) {
+    throw new Error(`create-feature-flag returned no flag for "${key}"`);
+  }
+  return { flag: created, created: true };
 }

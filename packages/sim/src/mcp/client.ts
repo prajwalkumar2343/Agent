@@ -1,3 +1,5 @@
+import { envVault, type SecretRef, type SecretVault } from '../../../shared/src/vault.ts';
+
 /**
  * Streamable-HTTP MCP client for the audience-sim endpoint — same dialect as
  * packages/posthog/src/mcp.ts but generic: optional bearer auth, no
@@ -8,8 +10,10 @@
 export interface SimMcpConfig {
   /** MCP endpoint, e.g. http://127.0.0.1:4100/mcp */
   url: string;
-  /** Optional bearer token (SIM_API_KEY). */
-  apiKey?: string;
+  /** Optional bearer as a vault keyword (e.g. `vault:SIM_API_KEY`). */
+  apiKeyRef?: SecretRef;
+  /** Vault that resolves `apiKeyRef` — default: the process env vault. */
+  vault?: SecretVault;
   /** Injectable for tests. */
   fetchFn?: typeof fetch;
 }
@@ -68,6 +72,7 @@ function parseBody(text: string, contentType: string): JsonRpcMessage[] {
 
 export function createSimMcp(config: SimMcpConfig): SimMcp {
   const call = config.fetchFn ?? fetch;
+  const vault = config.vault ?? envVault();
   const endpoint = config.url;
 
   let nextId = 0;
@@ -79,7 +84,7 @@ export function createSimMcp(config: SimMcpConfig): SimMcp {
       'content-type': 'application/json',
       accept: 'application/json, text/event-stream',
     };
-    if (config.apiKey) h.authorization = `Bearer ${config.apiKey}`;
+    if (config.apiKeyRef) h.authorization = `Bearer ${vault.resolve(config.apiKeyRef)}`;
     if (sessionId) {
       h['mcp-session-id'] = sessionId;
       h['mcp-protocol-version'] = PROTOCOL_VERSION;
@@ -139,9 +144,17 @@ export function createSimMcp(config: SimMcpConfig): SimMcp {
 
   return {
     async listTools() {
-      const msg = await request(() => send('tools/list', {}));
-      const result = (msg?.result ?? {}) as { tools?: McpTool[] };
-      return result.tools ?? [];
+      const tools: McpTool[] = [];
+      let cursor: string | undefined;
+      do {
+        const msg = await request(() =>
+          send('tools/list', cursor ? { cursor } : {}),
+        );
+        const result = (msg?.result ?? {}) as { tools?: McpTool[]; nextCursor?: string };
+        tools.push(...(result.tools ?? []));
+        cursor = result.nextCursor;
+      } while (cursor);
+      return tools;
     },
 
     async callTool(name, args = {}) {

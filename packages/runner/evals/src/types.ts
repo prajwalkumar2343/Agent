@@ -3,14 +3,15 @@ import type { AgentTrace } from '../../src/trace.ts';
 import type { ToolCallRecord } from '../../src/harness.ts';
 
 /**
- * Eval dataset schema for the two-agent feature pipeline.
+ * Eval dataset schema for the feature pipeline.
  *
  * A task = one build request: a Spec + flag key run through the production
  * agent factory (`createOrchestrator` → `buildOrchestratorPrompt`) inside a
  * fresh fixture repo, against a scripted-or-live model, a scripted VM-coder
- * sandbox (`reference.vm_script`), and a mocked GitHub REST / PostHog MCP
- * backend. Graders see the merged trajectory (orchestrator + github
- * sub-agent) plus final world state (fixture files, recorded API state).
+ * sandbox (`reference.vm_script` — the fake pi also drives the mocked GitHub
+ * backend through the refs→commit→pulls sequence it owns in production), and
+ * a mocked GitHub REST / PostHog MCP backend. Graders see the orchestrator
+ * trajectory plus final world state (fixture files, recorded API state).
  */
 
 export type Suite = 'capability' | 'regression';
@@ -80,7 +81,7 @@ export interface EvalTask {
     expected_outcome: string;
     /** Reference trajectory for the primary agent (mock-mode replay). */
     script: ScriptStep[];
-    /** Reference trajectory for the GitHub sub-agent. */
+    /** Deprecated — the github sub-agent is gone; pi owns remote writes inside the VM. Kept so old dataset files still parse. */
     github_script?: ScriptStep[];
     /**
      * What the eval sandbox does on the Nth `delegate_to_vm_coder` call —
@@ -92,6 +93,7 @@ export interface EvalTask {
     /** Extra forbidden arg patterns, e.g. {"runShell": {"command": {"matches": "git\\s+push"}}}. */
     forbidden_args?: Record<string, Record<string, ArgMatcher>>;
     required_args?: Record<string, Record<string, ArgMatcher>>;
+    /** Deprecated: tool calls are uncapped. Kept only so old dataset files still parse. */
     max_tool_calls?: number;
   };
   graders: GraderSpec[];
@@ -151,7 +153,7 @@ export interface EvalContext {
   task: EvalTask;
   /** Primary agent trajectory. */
   toolCalls: ToolCallRecord[];
-  /** GitHub sub-agent trajectory (from the handoff trace). */
+  /** Always [] — the github sub-agent was removed; kept so graders/datasets still typecheck. */
   ghToolCalls: ToolCallRecord[];
   gh: GhState;
   ph: PhCall[];

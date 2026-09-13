@@ -19,6 +19,14 @@ const PRICES: Record<string, Price> = {
   'claude-opus-4-5': { input: 15.0, output: 75.0, cache_read: 1.5, cache_write: 18.75 },
   'claude-opus-4-1': { input: 15.0, output: 75.0, cache_read: 1.5, cache_write: 18.75 },
   'claude-haiku-4-5': { input: 0.8, output: 4.0, cache_read: 0.08, cache_write: 1.0 },
+  // OpenCode Zen rates — contributor-free models bill $0 (prompts train future models).
+  'muse-spark-1.3': { input: 1.25, output: 4.25, cache_read: 0.15, cache_write: 1.25 },
+  'muse-spark-1.2': { input: 1.25, output: 4.25, cache_read: 0.15, cache_write: 1.25 },
+  'muse-spark-1.3-contributor-free': { input: 0, output: 0, cache_read: 0, cache_write: 0 },
+  'muse-spark-1.2-contributor-free': { input: 0, output: 0, cache_read: 0, cache_write: 0 },
+  // Zen Go subscription tier — flat plan, no per-token charge.
+  'muse-spark-1.3-contributor': { input: 0, output: 0, cache_read: 0, cache_write: 0 },
+  'muse-spark-1.2-contributor': { input: 0, output: 0, cache_read: 0, cache_write: 0 },
   'eval-scripted': { input: 0, output: 0, cache_read: 0, cache_write: 0 },
 };
 

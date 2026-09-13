@@ -3,7 +3,14 @@ import { z } from 'zod';
 import { flagKeyFor, slugify, type Spec } from '../../shared/src/index.ts';
 
 export const SpecSchema = z.object({
-  title: z.string().min(1).max(80),
+  // Slug/flag key derive from the title — an all-symbol title ('!!!')
+  // passes min(1) but slugifies to '', and flagKeyFor then throws
+  // mid-pipeline. Reject it at the schema boundary.
+  title: z
+    .string()
+    .min(1)
+    .max(80)
+    .refine((t) => slugify(t) !== '', 'title must contain a letter or digit'),
   summary: z.string().min(1).max(500),
   acceptance: z.array(z.string().min(1)).min(1).max(8),
 });

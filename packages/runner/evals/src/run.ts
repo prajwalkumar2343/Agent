@@ -6,7 +6,6 @@ import type { LanguageModel } from 'ai';
 import { llmModelId, llmProvider, modelFromEnv } from '../../src/model.ts';
 import { slugify } from '../../../shared/src/contracts.ts';
 import { buildOrchestratorPrompt, createOrchestrator } from '../../src/agents/orchestrator.ts';
-import type { GithubHandoffResult } from '../../src/agents/github.ts';
 import { evalSandbox } from './sandbox-mock.ts';
 import type { HarnessResult } from '../../src/harness.ts';
 import type { LanguageModelUsage } from 'ai';
@@ -62,7 +61,8 @@ interface Opts {
 function parseArgs(argv: string[]): Opts {
   const get = (name: string) => {
     const i = argv.indexOf(`--${name}`);
-    return i >= 0 ? argv[i + 1] : undefined;
+    const v = i >= 0 ? argv[i + 1] : undefined;
+    return v !== undefined && !v.startsWith('-') ? v : undefined;
   };
   const has = (name: string) => argv.includes(`--${name}`);
   const model = (get('model') ?? 'mock') as Opts['model'];
@@ -129,7 +129,6 @@ async function runTrial(
     ? mockPostHog(typeof phSpec === 'object' ? { existingFlags: phSpec.existing_flags } : {})
     : undefined;
   const t0 = Date.now();
-  let handoff: GithubHandoffResult | undefined;
   let error: string | undefined;
   let result: HarnessResult | undefined;
   let sandbox: ReturnType<typeof evalSandbox> | undefined;
@@ -140,40 +139,21 @@ async function runTrial(
     const model: LanguageModel = live
       ? modelFromEnv()
       : scriptedModel(task.reference.script);
-    const githubModel: LanguageModel = live
-      ? modelFromEnv()
-      : scriptedModel(
-          task.reference.github_script ?? [
-            { tool: 'createBranch' },
-            { tool: 'commitChanges', input: { message: 'feat: eval change' } },
-            { tool: 'openPR', input: { title: 'feat: eval change', body: 'eval' } },
-            { text: 'PR opened: https://github.com/acme/app/pull/42' },
-          ],
-        );
 
-    sandbox = evalSandbox(fixture.dir, task.reference.vm_script);
+    // Single-agent pipeline: pi owns the remote writes inside the sandbox —
+    // the eval sandbox plays that side too (push + PR against the gh mock).
+    sandbox = evalSandbox(fixture.dir, task.reference.vm_script, { gh, branch });
     const harness = createOrchestrator({
       root: fixture.dir,
-      github: {
-        repo: 'acme/app',
-        token: 'eval-token',
-        branch,
-        base: 'main',
-        repoDir: fixture.dir,
-        fetchFn: gh.fetchFn,
-      },
+      branch,
       sandbox,
       spec: task.input.spec,
       flagKey: task.input.flag_key,
       featureContext: task.input.feature_context,
       evidence: task.input.evidence,
       model,
-      githubModel,
       maxSteps: task.environment.max_steps ?? 40,
       posthog: ph?.config,
-      onHandoff: (r: GithubHandoffResult) => {
-        handoff = r;
-      },
       trace: {
         agent: 'orchestrator',
         session_id: `${runId}:${task.id}:${trial}`,
@@ -197,16 +177,16 @@ async function runTrial(
   }
   const latency = Date.now() - t0;
 
-  // --- build EvalContext (world state + merged trajectory) ---
+  // --- build EvalContext (world state + trajectory) ---
   const usageA = usageTotals(result?.totalUsage);
-  const usageB = handoff?.trace?.usage;
   const tokens = {
-    input: usageA.input + (usageB?.input_tokens ?? 0),
-    output: usageA.output + (usageB?.output_tokens ?? 0),
-    cache_read: usageA.cache_read + (usageB?.cache_read_tokens ?? 0),
-    cache_write: usageA.cache_write + (usageB?.cache_creation_tokens ?? 0),
+    input: usageA.input,
+    output: usageA.output,
+    cache_read: usageA.cache_read,
+    cache_write: usageA.cache_write,
   };
-  const prUrl = handoff?.pr_url;
+  const ghState = gh.state();
+  const prUrl = ghState.pr?.url;
   const phCalls: PhCall[] = (result?.toolCalls ?? [])
     .filter((c) => c.toolName === 'posthog')
     .map((c) => {
@@ -221,8 +201,8 @@ async function runTrial(
   const ctx: EvalContext = {
     task,
     toolCalls: result?.toolCalls ?? [],
-    ghToolCalls: handoff?.trace?.toolCalls ?? [],
-    gh: gh.state(),
+    ghToolCalls: sandbox?.ghCalls ?? [],
+    gh: ghState,
     ph: phCalls,
     ph_flags: ph?.state().flags ?? {},
     workspace: fixture.dir,
@@ -299,7 +279,6 @@ async function runTrial(
       truncated: ctx.truncated,
     },
     primary_trace: result?.trace,
-    github_trace: handoff?.trace,
     verdicts,
     failure_mode: failureMode,
     step_labels: ctx.step_labels,

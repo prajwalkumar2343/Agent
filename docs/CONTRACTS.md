@@ -8,11 +8,14 @@ the code wins. Change contracts only via a dedicated PR to `packages/shared`.
 ```
 received → spec → checked → evidence → build → reported
   → await_rollout → await_ci → live → monitor → done
-                                         ↘ rolled_back   ↘ failed (any state)
+    ↘ done (feature-index hit)             ↘ rolled_back   ↘ failed (any state)
 ```
 
-- `checked`: two-signal feature check done (docs MCP + PostHog taxonomy).
-  If `exists=false`, skip `evidence` and go straight to `build`.
+- `checked`: three-signal feature check done — shipped-feature index
+  (`features.md`) + docs MCP + PostHog taxonomy. An index hit is
+  authoritative: the requester is told the feature already exists and the
+  run goes straight to `done`. Otherwise, if `exists=false`, skip
+  `evidence` and go straight to `build`.
 - `await_ci`: PM confirmed rollout; waiting for green check_runs on the PR
   before auto-merge + flag enable.
 
@@ -33,7 +36,20 @@ received → spec → checked → evidence → build → reported
 ```
 
 Slack `action_id`s: `rollout_confirm` (button `value` = pct),
-`rollout_cancel`, `rollback_confirm`.
+`deploy_confirm` (`value` = user count), `rollout_cancel`, `rollback_confirm`.
+
+`POST /api/deploy/users` — internal, `x-run-secret: $RUN_CALLBACK_SECRET`
+(the coding agent's `deploy_to_users` tool calls this):
+
+```ts
+{ flag_key, users, thread_ts?, seed? }   // users=0 → undeploy
+// → 200 {flag_key, requested, applied, cohort_size, total_users}
+// GET ?flag_key=… → {flag_key, cohort_size, total_users}
+```
+
+`thread_ts` binds the call to a run: when the run exists its `flag_key`
+must match — an agent can only ever deploy its own flag. `seed` tops the
+users table up with demo rows first (requires `DEPLOY_ALLOW_SEED=1`).
 
 ## Naming
 
@@ -57,3 +73,9 @@ PM replies "roll out to 15%" → parse pct → `rollout_confirm` button card →
 `pending_rollout={pct}`, state `await_ci` → check_runs green → merge PR →
 PATCH flag `rollout_percentage=pct` → `live` → schedule `[+12h,+24h,+48h]`.
 CI red → DM PM, stay `await_rollout`. `rollback` → flag to 0%.
+
+User-count variant: "roll out to 500 users" → `deploy_confirm` card →
+`pending_rollout={users}` → on merge, `feature_cohorts` gets the first N
+users of `DEPLOY_USERS_TABLE` → `live` with `rollout_users=N`. Rollback
+deletes the cohort. The coding agent hits the same surface via
+`POST /api/deploy/users`.

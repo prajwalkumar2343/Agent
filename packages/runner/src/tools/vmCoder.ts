@@ -5,6 +5,7 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 import { tool, type Tool } from 'ai';
 import { z } from 'zod';
+import { scanChangedPaths } from '../../../guard/src/index.ts';
 import type { SandboxProvider } from '../sandbox/types.ts';
 
 const execFileAsync = promisify(execFile);
@@ -73,11 +74,13 @@ export function vmCoderDelegateTool(ctx: VmCoderContext): Tool {
   let calls = 0;
   return tool({
     description:
-      'Run the coding task in an isolated VM (pi coding agent). It edits the ' +
-      'product repo there; the resulting diff is applied to your local ' +
-      'checkout automatically. Input: a complete task spec — the VM agent ' +
-      'cannot see your context. Call again with failure output to have it ' +
-      'fix verification failures.',
+      'Run the coding task in an isolated VM (pi coding agent). pi owns the ' +
+      'change end to end there: it edits the product repo, commits, pushes ' +
+      'the fixed feature branch, and opens the PR — the PR URL comes back in ' +
+      'its report. The resulting diff is also applied to your local checkout ' +
+      'automatically for verification. Input: a complete task spec — the VM ' +
+      'agent cannot see your context. Call again with failure output to have ' +
+      'it fix verification failures (it pushes follow-up commits).',
     inputSchema: z.object({
       task: z.string().describe('Complete coding task: what to build, acceptance criteria, constraints'),
     }),
@@ -87,7 +90,7 @@ export function vmCoderDelegateTool(ctx: VmCoderContext): Tool {
           applied: false,
           files_changed: [],
           report: '',
-          error: `VM invocation budget exhausted (${ctx.maxCalls}/run) — hand off what you have or report the blocker.`,
+          error: `VM invocation budget exhausted (${ctx.maxCalls}/run) — report the blocker.`,
         };
       }
       const res = await ctx.sandbox.runTask({ task, timeoutMs: ctx.timeoutMs });
@@ -98,6 +101,10 @@ export function vmCoderDelegateTool(ctx: VmCoderContext): Tool {
       } catch (err) {
         applyError = err instanceof Error ? err.message : String(err);
       }
+      // pi commits+pushes itself now — the commit-time path scan is gone, so
+      // surface protected-path findings here: the merge gate will reject
+      // them; the orchestrator can have pi back them out.
+      const blocked = scanChangedPaths(filesChanged).filter((f) => f.severity === 'block');
       const result: VmCoderResult = {
         report: res.report,
         filesChanged,
@@ -113,6 +120,12 @@ export function vmCoderDelegateTool(ctx: VmCoderContext): Tool {
         report: res.report,
         ...(res.exitCode !== 0 ? { warning: `pi exited ${res.exitCode}` } : {}),
         ...(applyError ? { apply_error: applyError } : {}),
+        ...(blocked.length
+          ? {
+              blocked_paths: blocked.map((b) => `${b.path} (${b.rule})`),
+              note: 'diff touches protected paths — the merge gate rejects them; re-delegate to have pi move the change inside the feature’s own paths',
+            }
+          : {}),
       };
     },
   });

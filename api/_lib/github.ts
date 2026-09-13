@@ -1,8 +1,9 @@
-import { requireEnv } from '../../packages/shared/src/index.ts';
+import { requireEnv, type FeatureRunInputs } from '../../packages/shared/src/index.ts';
 
 /**
  * Minimal GitHub REST adapter scoped to what the pipeline needs — check-runs
- * for a commit and PR merge. Auth is the fine-grained PAT (docs/ENV.md).
+ * for a commit, PR merge, and the feature-run workflow_dispatch. Auth is the
+ * fine-grained PAT (docs/ENV.md).
  */
 
 async function gh<T>(path: string, init: { method?: string; body?: unknown } = {}): Promise<T> {
@@ -17,6 +18,7 @@ async function gh<T>(path: string, init: { method?: string; body?: unknown } = {
     ...(init.body !== undefined ? { body: JSON.stringify(init.body) } : {}),
   });
   if (!res.ok) throw new Error(`github ${init.method ?? 'GET'} ${path} failed: ${res.status}`);
+  if (res.status === 204) return undefined as T;
   return (await res.json()) as T;
 }
 
@@ -63,4 +65,17 @@ export async function prFiles(prNumber: number): Promise<PrFile[]> {
     if (batch.length < 100) break;
   }
   return files;
+}
+
+/**
+ * Kick off .github/workflows/feature-run.yml on the platform repo when a run
+ * enters `build`. Input contract: docs/CONTRACTS.md. The dispatch endpoint
+ * answers 204 with no body — the run's workflow_run_id stays unset (the
+ * callback identifies the run by thread_ts anyway).
+ */
+export function dispatchFeatureRun(inputs: FeatureRunInputs): Promise<void> {
+  return gh(`/repos/${requireEnv('PLATFORM_REPO')}/actions/workflows/feature-run.yml/dispatches`, {
+    method: 'POST',
+    body: { ref: process.env.PLATFORM_REF ?? 'main', inputs },
+  });
 }

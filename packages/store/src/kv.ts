@@ -20,8 +20,9 @@ const runKey = (threadTs: string) => `${RUN_PREFIX}${threadTs}`;
 /**
  * RunStore over Vercel KV / Upstash REST. Each run is one JSON document at
  * `run:<thread_ts>`; `runs:index` is a SET of thread_ts values for `list()`.
- * Single-command writes are atomic; create/update are read-modify-write
- * (see RunStore docs for the concurrency contract).
+ * The REST path is one stateless command per call — no WATCH/etag — so
+ * create() compensates a failed index add with DEL, and update() stays
+ * read-modify-write, last-write-wins (the RunStore concurrency contract).
  */
 export function createKvRunStore(config: KvConfig): RunStore {
   const url = config.url.replace(/\/+$/, '');
@@ -47,8 +48,9 @@ export function createKvRunStore(config: KvConfig): RunStore {
   return {
     get,
     async create(run) {
-      // SET NX gives us an atomic exists-check; the index add happens after
-      // and is idempotent, so a crash mid-create leaves a harmless orphan doc.
+      // SET NX gives us an atomic exists-check; the index add is a second
+      // call, so on its failure we DEL the fresh doc — otherwise the orphan
+      // stays unindexed and a retry hits a phantom RunExistsError.
       const res = await command<string | null>(
         'set',
         runKey(run.thread_ts),
@@ -56,7 +58,20 @@ export function createKvRunStore(config: KvConfig): RunStore {
         'NX',
       );
       if (res !== 'OK') throw new RunExistsError(run.thread_ts);
-      await command('sadd', INDEX_KEY, run.thread_ts);
+      try {
+        await command('sadd', INDEX_KEY, run.thread_ts);
+      } catch (err) {
+        // Best-effort rollback; a failed DEL leaves an orphan but the
+        // original error still surfaces to the caller. Log it — a silent
+        // orphan stays unindexed and a retry hits a phantom RunExistsError.
+        await command('del', runKey(run.thread_ts)).catch((delErr) =>
+          console.error(
+            `kv rollback del failed for ${run.thread_ts}:`,
+            delErr instanceof Error ? delErr.message : delErr,
+          ),
+        );
+        throw err;
+      }
       return run;
     },
     async update(threadTs, mutate) {

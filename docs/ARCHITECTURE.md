@@ -8,16 +8,19 @@ Slack mention/DM ──▶ api/slack/events ──▶ create run (received)
                                           │                          (mintlify + posthog)
                                           ▼
                               workflow_dispatch → feature-run.yml
-                                (runner: orchestrator → pi in a sandbox VM
-                                 → github agent; patch back, verify, PR)
+                                (runner: orchestrator → pi in a sandbox VM —
+                                 pi edits, commits, pushes the branch, opens
+                                 the PR; patch back, verify)
                                           │ POST /api/runs/complete
                                           ▼
                           reported → await_rollout ◀── PM "roll out to N%"
-                              (api/rollout/parse → confirm card)
-                                          │ rollout_confirm click → await_ci
+                              (api/rollout/parse → confirm card)   or "to N users"
+                                          │ rollout_confirm / deploy_confirm
+                                          │ click → await_ci
                                           ▼
                      api/github/webhook: checks green → merge PR →
-                       PostHog flag to N% → live ──▶ api/cron/sweep:
+                       PostHog flag to N%  |  Postgres cohort to N users
+                       (api/deploy/users)   → live ──▶ api/cron/sweep:
                        +12h/+24h/+48h reports → monitor → done
 ```
 
@@ -45,6 +48,11 @@ Rules that keep this scalable:
   state: Slack HMAC + team allowlist, `x-run-secret` for internal endpoints,
   `?secret` for cron, optional `GH_WEBHOOK_SECRET` HMAC, `PM_USER_IDS` for the
   control plane. See `docs/CONTRACTS.md` §Auth boundaries.
+- **Cohort deploys live in Postgres.** `packages/deploy` owns
+  `feature_cohorts`/`deploy_events` against `POSTGRES_URL` (product `users`
+  table is the member source). The coding agent triggers it through
+  `POST /api/deploy/users` (run-secret auth, flag pinned to its run,
+  `DEPLOY_MAX_USERS` cap) — DB credentials never leave the deployment env.
 - **State through the machine.** All run mutations go through
   `transitionRun`/`advance` — illegal edges throw `IllegalTransitionError`
   and handlers map that to 409. Terminal states: `done`, `rolled_back`,

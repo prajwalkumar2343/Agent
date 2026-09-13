@@ -25,6 +25,7 @@ test('happy path walks the full pipeline', () => {
 
 test('checked may skip evidence when the feature does not exist', () => {
   assert.equal(canTransition('checked', 'build'), true);
+  assert.equal(canTransition('checked', 'done'), true);
   assert.equal(canTransition('evidence', 'reported'), false);
 });
 

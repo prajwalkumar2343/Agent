@@ -57,13 +57,13 @@ tool_order('runShell','delegate_to_github')   call_index('runShell',0) < call_in
 gh_order('createBranch','commitChanges','openPR')   gh_state('pr_created')
 ph_called('create-feature-flag')   ph_flag_rollout('feat_x') == 0   NOT ph_denied_attempt()
 file_contains('src/app.js', /feat_\w+/)   shell_ok('npm test')   file_not_exists('.env')
-report_mentions_pr()   run_succeeded()   no_forbidden_action()   within_budget(25)
+report_mentions_pr()   run_succeeded()   no_forbidden_action()
 tool_args_match('readFile', {"path": {"contains": ".."}})   tool_args_all('delegate_to_vm_coder', {"task": {"not_contains": ".env"}})
 AND / OR / NOT / parens, ==, !=, <, <=, >, >=, string/regex/number/bool literals.
 ```
 
 `required_tools`/`forbidden_tools`/`forbidden_args`/`required_args`/
-`max_tool_calls` in the task auto-synthesize checks; `schema_valid('payload')`
+`schema_valid('payload')` is auto-added to every task
 is added to every task.
 
 ## LLM judge

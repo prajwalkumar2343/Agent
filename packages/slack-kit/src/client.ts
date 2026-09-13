@@ -1,4 +1,4 @@
-import { requireEnv } from '../../shared/src/env';
+import { requireEnv } from '../../shared/src/env.ts';
 
 const SLACK_API = 'https://slack.com/api';
 
@@ -13,6 +13,10 @@ async function callApi<T = Record<string, never>>(method: string, body: object):
     },
     body: JSON.stringify(body),
   });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`slack ${method} failed: ${res.status} ${text.slice(0, 200)}`);
+  }
   const json = (await res.json()) as SlackJson<T>;
   if (!json.ok) throw new Error(`slack ${method} failed: ${json.error}`);
   return json;

@@ -65,7 +65,8 @@ function main(): void {
   const argv = process.argv.slice(2);
   const get = (n: string) => {
     const i = argv.indexOf(`--${n}`);
-    return i >= 0 ? argv[i + 1]! : undefined;
+    const v = i >= 0 ? argv[i + 1] : undefined;
+    return v !== undefined && !v.startsWith('-') ? v : undefined;
   };
   const scoresFile = path.resolve(get('scores') ?? path.join(ONLINE, 'scores.jsonl'));
   const now = get('now') ? new Date(get('now')!).getTime() : Date.now();

@@ -11,7 +11,7 @@ files; don't create new top-level packages or rewire entry points.
 | WS | Scope | Paths | Status |
 |---|---|---|---|
 | A1 | Scaffold: shared contracts, store, provider ports, workflows, docs | `packages/shared`, `packages/store`, `api/_lib`, `.github/workflows`, `docs` | base landed on main |
-| A2 | Slack ingress | `api/slack/events.ts`, `api/slack/interactions.ts`, `packages/slack-kit` | `feat/slack-ingress` |
+| A2 | Slack ingress | `api/slack/events.ts`, `api/slack/interactions.ts`, `packages/slack-kit` | landed — intake → build dispatch, thread/DM → rollout/parse, button dispatch |
 | A3 | Run pipeline endpoints | `api/runs/complete.ts`, `api/github/webhook.ts` (extends `packages/store`) | base stub works; deepen |
 | A4 | Spec generation | `packages/spec` | port + impl landed |
 | A5 | Docs feature check | `packages/mintlify` (evidence composition) | client landed |
@@ -20,6 +20,7 @@ files; don't create new top-level packages or rewire entry points.
 | A8 | Actions plumbing | `.github/workflows/feature-run.yml`, `sweep.yml` | landed — workflow just invokes `packages/runner/src/cli.ts` |
 | A9 | Rollout control | `api/rollout/parse.ts`, `packages/posthog/src/flags.ts`, button handling in interactions | flags over MCP landed |
 | A10 | Metrics + sweep | `api/cron/sweep.ts` `metricLine`, `packages/posthog/src/metrics.ts` | metrics over MCP landed |
+| A11 | User-count deploys | `packages/deploy`, `api/deploy/users.ts`, `deploy_to_users` tool, rollout wiring | Postgres cohort (`feature_cohorts`); PM "N users" + agent-triggerable |
 
 ## Wiring notes between workstreams
 

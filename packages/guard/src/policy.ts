@@ -14,9 +14,12 @@ export function envInt(
   name: string,
   fallback: number,
   env: NodeJS.ProcessEnv = process.env,
+  min = 1,
 ): number {
-  const n = Number(env[name]);
-  return Number.isInteger(n) && n > 0 ? n : fallback;
+  const raw = env[name]?.trim();
+  if (!raw) return fallback;
+  const n = Number(raw);
+  return Number.isInteger(n) && n >= min ? n : fallback;
 }
 
 export function envList(name: string, env: NodeJS.ProcessEnv = process.env): string[] {
@@ -33,12 +36,28 @@ export function pipelinePaused(env: NodeJS.ProcessEnv = process.env): boolean {
 
 /** Feature branches the pipeline may create/commit — fixed prefix, never a protected name. */
 export function agentBranchPrefix(env: NodeJS.ProcessEnv = process.env): string {
-  return env.AGENT_BRANCH_PREFIX ?? 'agent/';
+  // `||` not `??` — an empty/blank value must fall back too: startsWith('')
+  // is always true, which would silently disable the branch guard.
+  return env.AGENT_BRANCH_PREFIX?.trim() || 'agent/';
 }
 
 /** Hard cap on automated flag rollout — above this, a human drives PostHog. */
 export function rolloutMaxPct(env: NodeJS.ProcessEnv = process.env): number {
-  return Math.min(envInt('ROLLOUT_MAX_PCT', 50, env), 100);
+  // min=0: ROLLOUT_MAX_PCT=0 is a real kill-switch value, not a missing one.
+  return Math.min(envInt('ROLLOUT_MAX_PCT', 50, env, 0), 100);
+}
+
+/**
+ * Hard cap on Postgres user-count deploys (feature_cohorts) — above this a
+ * human drives the rollout. DEPLOY_MAX_USERS=0 disables cohort deploys.
+ */
+export function deployMaxUsers(env: NodeJS.ProcessEnv = process.env): number {
+  return envInt('DEPLOY_MAX_USERS', 500, env, 0);
+}
+
+/** Demo seed gate — without it the deploy endpoint never tops up users. */
+export function deploySeedAllowed(env: NodeJS.ProcessEnv = process.env): boolean {
+  return envBool('DEPLOY_ALLOW_SEED', env);
 }
 
 export interface IntakePolicy {

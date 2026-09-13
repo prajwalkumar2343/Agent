@@ -7,7 +7,7 @@
   ],
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "node --test --experimental-strip-types packages/*/src/*.test.ts packages/*/test/*.test.ts",
+    "test": "node --test --experimental-strip-types api/**/*.test.ts packages/*/src/*.test.ts packages/*/test/*.test.ts",
     "sim:mcp": "node --experimental-strip-types packages/sim/src/mcp/server.ts",
     "evals:dataset": "node --experimental-strip-types packages/runner/evals/src/gen-dataset.ts",
     "evals:verify": "node --experimental-strip-types packages/runner/evals/src/run.ts --model mock",
@@ -28,6 +28,7 @@
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
+    "@types/pg": "^8.15.5",
     "@vercel/node": "^5.1.0",
     "typescript": "^5.7.0"
   }

@@ -1,3 +1,10 @@
+import {
+  envVault,
+  secretRef,
+  type SecretRef,
+  type SecretVault,
+} from '../../shared/src/vault.ts';
+
 /**
  * PostHog MCP transport — every PostHog capability the pipeline uses (event
  * taxonomy, HogQL evidence, flag mutations, metric pulls) goes through the
@@ -7,8 +14,14 @@
  */
 
 export interface PostHogMcpConfig {
-  /** Personal API key — PostHog "MCP Server" preset (phx_…), project-scoped. */
-  apiKey: string;
+  /**
+   * Personal API key as a vault keyword (e.g. `vault:POSTHOG_API_KEY`) —
+   * PostHog "MCP Server" preset (phx_…), project-scoped. The value is
+   * resolved per request inside `headers()`; it never sits on the config.
+   */
+  apiKeyRef: SecretRef;
+  /** Vault that resolves `apiKeyRef` — default: the process env vault. */
+  vault?: SecretVault;
   /** Endpoint. Defaults to https://mcp.posthog.com/mcp (region auto-routed). */
   url?: string;
   /** Pin the session to a project (x-posthog-project-id) — keeps writes aimed at one project. */
@@ -21,13 +34,16 @@ export interface PostHogMcpConfig {
   fetchFn?: typeof fetch;
 }
 
-export function posthogMcpConfigFromEnv(env: NodeJS.ProcessEnv = process.env): PostHogMcpConfig {
-  const apiKey = env.POSTHOG_API_KEY;
-  if (!apiKey) throw new Error('Missing required env var: POSTHOG_API_KEY');
+export function posthogMcpConfigFromEnv(
+  env: NodeJS.ProcessEnv = process.env,
+  vault?: SecretVault,
+): PostHogMcpConfig {
+  if (!env.POSTHOG_API_KEY) throw new Error('Missing required env var: POSTHOG_API_KEY');
   return {
-    apiKey,
-    url: env.POSTHOG_MCP_URL,
-    projectId: env.POSTHOG_PROJECT_ID,
+    apiKeyRef: secretRef('POSTHOG_API_KEY'),
+    vault: vault ?? envVault(env),
+    url: env.POSTHOG_MCP_URL || undefined,
+    projectId: env.POSTHOG_PROJECT_ID || undefined,
     features: env.POSTHOG_MCP_FEATURES?.split(',').map((s) => s.trim()).filter(Boolean),
   };
 }
@@ -94,6 +110,7 @@ function parseBody(text: string, contentType: string): JsonRpcMessage[] {
 
 export function createPostHogMcp(config: PostHogMcpConfig): PostHogMcp {
   const call = config.fetchFn ?? fetch;
+  const vault = config.vault ?? envVault();
   const url = new URL(config.url ?? DEFAULT_URL);
   if (config.features?.length) url.searchParams.set('features', config.features.join(','));
   const endpoint = url.toString();
@@ -105,7 +122,7 @@ export function createPostHogMcp(config: PostHogMcpConfig): PostHogMcp {
 
   function headers(): Record<string, string> {
     const h: Record<string, string> = {
-      authorization: `Bearer ${config.apiKey}`,
+      authorization: `Bearer ${vault.resolve(config.apiKeyRef)}`,
       'content-type': 'application/json',
       accept: 'application/json, text/event-stream',
       'x-posthog-mcp-mode': 'tools',

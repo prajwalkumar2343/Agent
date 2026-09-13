@@ -36,13 +36,24 @@ const DEPENDENCY_PATHS: RegExp =
   /(^|\/)(package\.json|package-lock\.json|npm-shrinkwrap\.json|yarn\.lock|pnpm-lock\.yaml|bun\.lockb?|requirements.*\.txt|pyproject\.toml|setup\.py|Pipfile(\.lock)?|poetry\.lock|Gemfile(\.lock)?|go\.(mod|sum)|Cargo\.(toml|lock)|composer\.(json|lock)|pom\.xml|build\.gradle(\.kts)?|Dockerfile.*|docker-compose\.ya?ml)$/;
 
 /** Key-shaped / secret-bearing filenames — warn, not block (test fixtures exist). */
-const SENSITIVE_PATHS: RegExp = /(^|\/)[^/]*\.(pem|key|p12|pfx)$|(^|\/)id_[a-z]+$|(^|\/)\.netrc$/;
+const SENSITIVE_PATHS: RegExp = /(^|\/)[^/]*\.(pem|key|p12|pfx)$|(^|\/)id_[a-z0-9_]+$|(^|\/)\.netrc$/;
+
+/**
+ * Invisible code points (zero-width spaces/joiners, bidi controls, tag
+ * chars, variation selectors, soft hyphen). Attackers sprinkle them
+ * inside trigger words so the text reads "ignore all instructions" to a
+ * model but doesn't match the screening regexes — strip before scanning.
+ */
+export const INVISIBLE_CHARS =
+  /[\u00AD\u034F\u061C\u115F\u1160\u17B4\u17B5\u180E\u200B-\u200F\u202A-\u202E\u2060-\u206F\uFE00-\uFE0F\uFEFF\u{E0000}-\u{E007F}\u{E0100}-\u{E01EF}]/gu;
 
 export function scanChangedPaths(paths: string[]): ScanFinding[] {
   const findings: ScanFinding[] = [];
   for (const p of paths) {
+    // Invisibles can smuggle a protected name past the regexes (`.​env`).
+    const clean = p.replace(INVISIBLE_CHARS, '');
     for (const { re, rule } of BLOCKED_PATHS) {
-      if (re.test(p)) {
+      if (re.test(clean)) {
         findings.push({
           severity: 'block',
           rule,
@@ -52,7 +63,7 @@ export function scanChangedPaths(paths: string[]): ScanFinding[] {
         break;
       }
     }
-    if (DEPENDENCY_PATHS.test(p)) {
+    if (DEPENDENCY_PATHS.test(clean)) {
       findings.push({
         severity: 'hold',
         rule: 'dependency-change',
@@ -60,7 +71,7 @@ export function scanChangedPaths(paths: string[]): ScanFinding[] {
         detail: 'dependency manifest changed — a human reviews before merge',
       });
     }
-    if (SENSITIVE_PATHS.test(p)) {
+    if (SENSITIVE_PATHS.test(clean)) {
       findings.push({
         severity: 'warn',
         rule: 'sensitive-path',
@@ -88,7 +99,7 @@ const SECRET_SHAPES: { re: RegExp; rule: string }[] = [
   { re: /ghp_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|gho_[A-Za-z0-9]{20,}/, rule: 'github-token' },
   { re: /sk-ant-[A-Za-z0-9_-]{20,}|sk-[A-Za-z0-9]{30,}/, rule: 'llm-key' },
   { re: /xox[baprs]-[A-Za-z0-9-]{10,}/, rule: 'slack-token' },
-  { re: /AKIA[0-9A-Z]{16}/, rule: 'aws-key' },
+  { re: /A(?:KIA|SIA|BIA|CIA|DIA|GPA|IDA|IPA|ROA)[0-9A-Z]{16}/, rule: 'aws-key' },
   { re: /-----BEGIN [A-Z ]*PRIVATE KEY/, rule: 'private-key' },
   { re: /glpat-[A-Za-z0-9_-]{15,}|AIza[0-9A-Za-z_-]{20,}/, rule: 'other-token' },
 ];
@@ -103,7 +114,8 @@ function addedLines(patch: string): string[] {
 
 export function scanPatchText(patch: string, path?: string): ScanFinding[] {
   const findings: ScanFinding[] = [];
-  for (const line of addedLines(patch)) {
+  // Strip invisibles so `ghp_​…`-style smuggling still matches the shapes.
+  for (const line of addedLines(patch.replace(INVISIBLE_CHARS, ''))) {
     for (const { re, severity, rule, detail } of CONTENT_RULES) {
       if (re.test(line)) {
         findings.push({ severity, rule, path, detail });
@@ -165,7 +177,6 @@ const INJECTION_PATTERNS: { re: RegExp; reason: string; block: boolean }[] = [
   { re: /-----BEGIN [A-Z ]*PRIVATE KEY/, reason: 'embedded-key', block: true },
   { re: /\bmerge\s+(this|the)\s+(pr|pull|branch)|push\s+to\s+main\b|delete\s+the\s+repo/i, reason: 'repo-manipulation', block: true },
   { re: /https?:\/\/[^\s]+/i, reason: 'contains-url', block: false },
-  { re: /[\u200B\u200C\u200D\uFEFF]/, reason: 'zero-width-chars', block: false },
 ];
 
 /**
@@ -178,10 +189,12 @@ export function screenFeatureIdea(text: string, maxChars = 2_000): IdeaScreen {
   if (text.length > maxChars) {
     return { verdict: 'block', reasons: [`exceeds ${maxChars} chars`] };
   }
-  const urls = text.match(/https?:\/\/[^\s]+/g) ?? [];
+  const cleaned = text.replace(INVISIBLE_CHARS, '');
+  if (cleaned !== text) reasons.push('zero-width-chars');
+  const urls = cleaned.match(/https?:\/\/[^\s]+/g) ?? [];
   if (urls.length > 3) reasons.push('url-flood');
   for (const { re, reason, block: b } of INJECTION_PATTERNS) {
-    if (re.test(text)) {
+    if (re.test(cleaned)) {
       reasons.push(reason);
       if (b) block = true;
     }

@@ -99,7 +99,8 @@ async function main(): Promise<void> {
   const argv = process.argv.slice(2);
   const get = (n: string) => {
     const i = argv.indexOf(`--${n}`);
-    return i >= 0 ? argv[i + 1] : undefined;
+    const v = i >= 0 ? argv[i + 1] : undefined;
+    return v !== undefined && !v.startsWith('-') ? v : undefined;
   };
   const tracesDir = path.resolve(get('traces') ?? process.env.TRACE_DIR ?? path.join(ONLINE, 'traces'));
   const judge = argv.includes('--judge');
@@ -144,7 +145,7 @@ async function main(): Promise<void> {
       sampled_reason: reasons.join('+'),
       run_status: failed ? 'failed' : 'success',
       schema_valid: ok,
-      tool_calls: t.toolCalls.length,
+      tool_calls: t.toolCalls?.length ?? t.tools?.length ?? 0,
       loop_flag: loopFlag(t),
       latency_ms: t.meta.total_ms ?? 0,
       cost_usd: costUsd(t.meta.model_id ?? '', {

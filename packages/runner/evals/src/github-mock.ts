@@ -208,11 +208,23 @@ export function mockGithub(spec?: string | GithubMockSpec): MockGithub {
         };
       }
     }
+    // The branch the run targeted, recovered from the create-ref body — lets
+    // a later GET on that ref prove existence even when the create 422'd.
+    const wanted = calls
+      .filter((c) => c.method === 'POST' && c.path.endsWith('git/refs'))
+      .map((c) => /^refs\/heads\/(.+)$/.exec(String((c.body as { ref?: unknown })?.ref ?? ''))?.[1])
+      .find((b): b is string => b !== undefined);
     return {
       calls,
-      branch_created: calls.some(
-        (c) => c.method === 'POST' && c.path.endsWith('git/refs') && c.status < 300,
-      ),
+      branch_created:
+        calls.some((c) => c.method === 'POST' && c.path.endsWith('git/refs') && c.status < 300) ||
+        // 422 = "reference already exists" — the branch exists, just not new.
+        calls.some((c) => c.method === 'POST' && c.path.endsWith('git/refs') && c.status === 422) ||
+        // e.g. commitChanges' refSha(branch) lookup on the branch-exists path.
+        (wanted !== undefined &&
+          calls.some(
+            (c) => c.method === 'GET' && c.status < 300 && c.path.endsWith(`git/ref/heads/${wanted}`),
+          )),
       commit_shas: calls
         .filter((c) => c.method === 'POST' && c.path.endsWith('git/commits') && c.status < 300)
         .map((_, i) => `commit-${i + 1}`),

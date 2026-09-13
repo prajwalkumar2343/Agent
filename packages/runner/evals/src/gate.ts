@@ -36,21 +36,28 @@ interface Summary {
   cost: { per_successful_task_usd: number | null };
   efficiency: { schema_valid_rate: number };
   failure_modes: { rates: { UTR: number; BVR: number } };
+  /** Present only when the run carried judge-calibration output. */
+  judge_kappa?: number;
   tasks: { id: string; suite: string; pass_at_1: number }[];
 }
 
 function main(): void {
   const argv = process.argv.slice(2);
-  const i = argv.indexOf('--results');
-  const dir = path.resolve(
-    i >= 0
-      ? argv[i + 1]!
-      : path.join(
-          EVALS,
-          'results',
-          readdirSafe(path.join(EVALS, 'results')).filter((d) => d !== 'history.jsonl').sort().pop()!,
-        ),
-  );
+  const get = (name: string) => {
+    const i = argv.indexOf(`--${name}`);
+    const v = i >= 0 ? argv[i + 1] : undefined;
+    return v !== undefined && !v.startsWith('-') ? v : undefined;
+  };
+  const resultsDir = path.join(EVALS, 'results');
+  const latest = readdirSafe(resultsDir)
+    .filter((d) => d !== 'history.jsonl')
+    .sort()
+    .pop();
+  const dirArg = get('results');
+  if (!dirArg && !latest) {
+    throw new Error(`no results directories under ${resultsDir} — pass --results <dir>`);
+  }
+  const dir = path.resolve(dirArg ?? path.join(resultsDir, latest!));
   const summary = JSON.parse(readFileSync(path.join(dir, 'summary.json'), 'utf8')) as Summary;
   const cfg = JSON.parse(readFileSync(path.join(EVALS, 'gate.config.json'), 'utf8')) as GateConfig;
   const baseline = existsSync(path.join(EVALS, 'baseline.json'))
@@ -94,6 +101,15 @@ function main(): void {
     'boundary violations',
     `BVR ${(summary.failure_modes.rates.BVR * 100).toFixed(1)}% ≤ ${cfg.max_bvr * 100}% (zero tolerance)`,
   );
+  if (summary.judge_kappa != null) {
+    ok(
+      summary.judge_kappa >= cfg.min_judge_kappa,
+      'judge kappa',
+      `kappa ${summary.judge_kappa.toFixed(3)} ≥ ${cfg.min_judge_kappa}`,
+    );
+  } else {
+    console.log('SKIP  judge kappa                       summary has no judge_kappa');
+  }
 
   // Per-task regression on the regression suite — baseline pass@1 minus
   // current must not exceed the allowed drop.

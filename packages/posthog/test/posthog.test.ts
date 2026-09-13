@@ -14,7 +14,19 @@ import {
   specKeywords,
   sqlRows,
   type FeatureFlag,
+  type PostHogMcpConfig,
 } from '../src/index.ts';
+import { mapVault, secretRef } from '../../shared/src/vault.ts';
+
+/** Config carrying a vault keyword — the key value resolves only inside headers(). */
+const cfg = (
+  key: string,
+  extra: Partial<PostHogMcpConfig> & { fetchFn: typeof fetch },
+): PostHogMcpConfig => ({
+  apiKeyRef: secretRef('POSTHOG_API_KEY'),
+  vault: mapVault({ POSTHOG_API_KEY: key }),
+  ...extra,
+});
 
 interface SeenRequest {
   method: string;
@@ -106,7 +118,7 @@ describe('posthog mcp transport', () => {
       tools: [{ name: 'execute-sql', inputSchema: { type: 'object' } }],
       call: () => ({ ok: 1 }),
     });
-    const ph = createPostHogMcp({ apiKey: 'phx_test', projectId: '42', fetchFn });
+    const ph = createPostHogMcp(cfg('phx_test', { projectId: '42', fetchFn }));
 
     const tools = await ph.listTools();
     assert.deepEqual(tools.map((t) => t.name), ['execute-sql']);
@@ -127,13 +139,13 @@ describe('posthog mcp transport', () => {
 
   it('parses SSE responses', async () => {
     const { fetchFn } = fakePostHog({ sse: true, call: () => 'pong' });
-    const ph = createPostHogMcp({ apiKey: 'k', fetchFn });
+    const ph = createPostHogMcp(cfg('k', { fetchFn }));
     assert.equal(await ph.callToolText('x'), 'pong');
   });
 
   it('throws on isError tool results', async () => {
     const { fetchFn } = fakePostHog({ call: () => new Error('boom') });
-    const ph = createPostHogMcp({ apiKey: 'k', fetchFn });
+    const ph = createPostHogMcp(cfg('k', { fetchFn }));
     await assert.rejects(() => ph.callTool('execute-sql', {}), /boom/);
   });
 });
@@ -150,7 +162,7 @@ describe('flags over MCP', () => {
     const { fetchFn, seen } = fakePostHog({
       call: (name) => (name === 'feature-flag-get-definition-by-key' ? { results: [flag] } : {}),
     });
-    const found = await findFlagByKey(createPostHogMcp({ apiKey: 'k', fetchFn }), 'feat_saved_cards');
+    const found = await findFlagByKey(createPostHogMcp(cfg('k', { fetchFn })), 'feat_saved_cards');
     assert.equal(found?.id, 7);
     const tools = seen.filter((r) => r.method === 'tools/call').map((r) => r.params?.name);
     assert.deepEqual(tools, ['feature-flag-get-definition-by-key']);
@@ -161,7 +173,7 @@ describe('flags over MCP', () => {
       call: (name) =>
         name === 'feature-flag-get-all' ? { results: [{ id: 7, key: 'feat_saved_cards' }] } : {},
     });
-    const found = await findFlagByKey(createPostHogMcp({ apiKey: 'k', fetchFn }), 'feat_saved_cards');
+    const found = await findFlagByKey(createPostHogMcp(cfg('k', { fetchFn })), 'feat_saved_cards');
     assert.equal(found?.id, 7);
   });
 
@@ -173,7 +185,7 @@ describe('flags over MCP', () => {
         return {};
       },
     });
-    await setRolloutPercentage(createPostHogMcp({ apiKey: 'k', fetchFn }), flag, 25);
+    await setRolloutPercentage(createPostHogMcp(cfg('k', { fetchFn })), flag, 25);
     const [name, args] = calls.find(([n]) => n === 'update-feature-flag')!;
     assert.equal(name, 'update-feature-flag');
     assert.equal(args.id, 7);
@@ -187,7 +199,7 @@ describe('flags over MCP', () => {
   it('setRolloutPercentage rejects bad pct', async () => {
     const { fetchFn } = fakePostHog({});
     await assert.rejects(
-      () => setRolloutPercentage(createPostHogMcp({ apiKey: 'k', fetchFn }), flag, 101),
+      () => setRolloutPercentage(createPostHogMcp(cfg('k', { fetchFn })), flag, 101),
       /invalid rollout percentage/,
     );
   });
@@ -201,7 +213,7 @@ describe('flags over MCP', () => {
       },
     });
     const res = await ensureFeatureFlag(
-      createPostHogMcp({ apiKey: 'k', fetchFn }),
+      createPostHogMcp(cfg('k', { fetchFn })),
       'feat_x',
       'X feature',
     );
@@ -238,7 +250,7 @@ describe('evidence over MCP', () => {
 
   it('featureCheckEvents reports searched=false on PostHog failure', async () => {
     const { fetchFn } = fakePostHog({ call: () => new Error('down') });
-    const res = await featureCheckEvents(createPostHogMcp({ apiKey: 'k', fetchFn }), SPEC);
+    const res = await featureCheckEvents(createPostHogMcp(cfg('k', { fetchFn })), SPEC);
     assert.deepEqual(res, { searched: false, matched: [] });
   });
 
@@ -259,7 +271,7 @@ describe('evidence over MCP', () => {
         return { results: [] };
       },
     });
-    const ev = await collectEvidence(createPostHogMcp({ apiKey: 'k', fetchFn }), SPEC);
+    const ev = await collectEvidence(createPostHogMcp(cfg('k', { fetchFn })), SPEC);
     assert.ok(ev.related_events.some((e) => e.name === 'card_saved' && e.count_30d === 88));
     assert.deepEqual(ev.notable_sessions, ['sess-abc', 'sess-def']);
     assert.equal(ev.recordings_reviewed, 2);
@@ -283,7 +295,7 @@ describe('metrics over MCP', () => {
         return { results: [[36, 21]] };
       },
     });
-    const m = await flagMetrics(createPostHogMcp({ apiKey: 'k', fetchFn }), 'feat_x', 24);
+    const m = await flagMetrics(createPostHogMcp(cfg('k', { fetchFn })), 'feat_x', 24);
     assert.equal(m.exposures, 36);
     assert.equal(m.unique_users, 21);
     assert.deepEqual(m.variants, { true: 30, false: 6 });
@@ -308,11 +320,12 @@ describe('metrics over MCP', () => {
 });
 
 describe('env config', () => {
-  it('requires POSTHOG_API_KEY and defaults the URL', () => {
+  it('requires POSTHOG_API_KEY and returns a vault keyword, never the value', () => {
     assert.throws(() => posthogMcpConfigFromEnv({}), /POSTHOG_API_KEY/);
-    const cfg = posthogMcpConfigFromEnv({ POSTHOG_API_KEY: 'phx', POSTHOG_PROJECT_ID: '1' });
-    assert.equal(cfg.apiKey, 'phx');
-    assert.equal(cfg.projectId, '1');
-    assert.equal(cfg.url, undefined);
+    const conf = posthogMcpConfigFromEnv({ POSTHOG_API_KEY: 'phx', POSTHOG_PROJECT_ID: '1' });
+    assert.equal(conf.apiKeyRef, 'vault:POSTHOG_API_KEY');
+    assert.equal(conf.vault!.resolve(conf.apiKeyRef), 'phx');
+    assert.equal(conf.projectId, '1');
+    assert.equal(conf.url, undefined);
   });
 });
