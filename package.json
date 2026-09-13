@@ -1,0 +1,23 @@
+{
+  "name": "platform",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "node --test --experimental-strip-types packages/*/src/*.test.ts packages/*/test/*.test.ts"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@vercel/functions": "^2.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "@vercel/node": "^5.1.0",
+    "typescript": "^5.7.0"
+  }
+}
