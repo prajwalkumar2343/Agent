@@ -1,11 +1,13 @@
 import { createMockProvider } from './providers/mock.ts';
+import { createMcpProvider, simMcpConfigFromEnv } from './providers/mcp.ts';
 import type { SimProvider } from './provider.ts';
 
 export * from './provider.ts';
-export { createMockProvider };
+export { createMockProvider, createMcpProvider, simMcpConfigFromEnv };
 
-const REGISTRY: Record<string, () => SimProvider> = {
-  mock: createMockProvider,
+const REGISTRY: Record<string, (env: NodeJS.ProcessEnv) => SimProvider> = {
+  mock: () => createMockProvider(),
+  mcp: (env) => createMcpProvider(simMcpConfigFromEnv(env)),
 };
 
 /**
@@ -18,5 +20,5 @@ export function getSimProvider(env: NodeJS.ProcessEnv = process.env): SimProvide
   if (!factory) {
     throw new Error(`unknown SIM_PROVIDER "${name}" — expected one of: ${Object.keys(REGISTRY).join(', ')}`);
   }
-  return factory();
+  return factory(env);
 }
