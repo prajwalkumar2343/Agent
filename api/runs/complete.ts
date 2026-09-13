@@ -12,6 +12,11 @@ import {
   type Run,
   type RunsCompletePayload,
 } from '../../packages/shared/src/index.ts';
+import {
+  agentBranchPrefix,
+  audit,
+  isExpectedPrUrl,
+} from '../../packages/guard/src/index.ts';
 import { dmUser, postToThread } from '../_lib/notify.ts';
 import { header, readRawBody, secretMatches } from '../_lib/http.ts';
 
@@ -47,6 +52,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!payload.thread_ts || (payload.status !== 'success' && payload.status !== 'failed')) {
     return res.status(400).send('invalid payload');
   }
+  // Shape-check the fields that later drive merges: branch must be an
+  // agent/* ref and pr_url must point at the product repo's pulls.
+  if (payload.branch && !payload.branch.startsWith(agentBranchPrefix())) {
+    return res.status(400).send('invalid branch');
+  }
+  if (payload.pr_url && !isExpectedPrUrl(payload.pr_url, requireEnv('PRODUCT_REPO'))) {
+    return res.status(400).send('invalid pr_url');
+  }
+  waitUntil(audit('run_complete', { thread_ts: payload.thread_ts, status: payload.status, pr: payload.pr_url }));
 
   const store = createRunStoreFromEnv();
   try {

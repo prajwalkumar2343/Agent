@@ -6,20 +6,31 @@ import {
   type RunStore,
 } from '../../packages/store/src/index.ts';
 import { requireEnv, type Run } from '../../packages/shared/src/index.ts';
+import {
+  createPostHogMcp,
+  flagMetrics,
+  formatMetricLine,
+  posthogMcpConfigFromEnv,
+} from '../../packages/posthog/src/index.ts';
 import { postToThread } from '../_lib/notify.ts';
 import { secretMatches } from '../_lib/http.ts';
 
 export const config = { maxDuration: 60 };
 
 /**
- * Metric-report line for a due report. TODO(A10): replace with real PostHog
- * metrics (packages/posthog metrics.ts) — flag exposure counts, guardrails.
+ * Metric-report line for a due report — flag exposure counts + the exception
+ * guardrail from PostHog MCP. A PostHog outage degrades to the flag's last
+ * known rollout state rather than killing the sweep.
  */
-function metricLine(run: Run): string {
-  return (
-    `Flag \`${run.flag_key}\` at *${run.rollout_pct ?? 0}%*. ` +
-    'Metric pull lands with the metrics workstream.'
-  );
+async function metricLine(run: Run): Promise<string> {
+  if (!run.flag_key) return 'No flag key recorded for this run.';
+  try {
+    const m = await flagMetrics(createPostHogMcp(posthogMcpConfigFromEnv()), run.flag_key);
+    return formatMetricLine(run.flag_key, run.rollout_pct, m);
+  } catch (err) {
+    console.error(`posthog metrics failed for ${run.thread_ts}`, err);
+    return `Flag \`${run.flag_key}\` at *${run.rollout_pct ?? 0}%*. Metric pull failed — see logs.`;
+  }
 }
 
 /** Post each due report exactly once; retire the run when the schedule empties. */
@@ -27,7 +38,7 @@ async function sweepRun(store: RunStore, run: Run, now: number): Promise<number>
   const due = dueReports(run, now);
   for (const t of due) {
     const label = run.report_schedule.indexOf(t);
-    await postToThread(run.channel, run.thread_ts, `Report #${label + 1} — ${metricLine(run)}`);
+    await postToThread(run.channel, run.thread_ts, `Report #${label + 1} — ${await metricLine(run)}`);
   }
   if (due.length === 0) return 0;
   await store.update(run.thread_ts, (r) => {

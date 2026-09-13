@@ -2,6 +2,8 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { waitUntil } from '@vercel/functions';
 import { requireEnv } from '../../packages/shared/src/env';
 import { postMessage, verifySlackSignature } from '../../packages/slack-kit/src/index';
+import { createRunStoreFromEnv, isTerminal } from '../../packages/store/src/index.ts';
+import { audit, checkIntake } from '../../packages/guard/src/index.ts';
 
 export const config = { api: { bodyParser: false }, maxDuration: 30 };
 
@@ -35,6 +37,42 @@ interface SlackEvent {
 async function handleIdea(event: SlackEvent): Promise<void> {
   if (!event.channel) return;
   const idea = (event.text ?? '').replace(/<@[A-Z0-9]+>/g, '').trim();
+
+  // Safeguard gate: kill switch → allowlists → injection screening →
+  // rate limits → dedup. Runs even for empty ideas so bare-mention spam
+  // hits the same counters. A rejection still gets a polite reply so the
+  // requester isn't left hanging; every decision hits the audit trail.
+  const runs = await createRunStoreFromEnv().list();
+  const activeRuns = runs.filter((r) => !isTerminal(r.state)).length;
+  const decision = await checkIntake({
+    user: event.user ?? '',
+    channel: event.channel,
+    idea,
+    activeRuns,
+  });
+  await audit('intake', {
+    user: event.user,
+    channel: event.channel,
+    allow: decision.allow,
+    reason: decision.reason,
+    flags: decision.flags,
+  });
+  if (!decision.allow) {
+    await postMessage({
+      channel: event.channel,
+      thread_ts: event.thread_ts ?? event.ts,
+      text: `Can't take that one — ${decision.reason}.`,
+    });
+    return;
+  }
+  if (decision.flags?.length) {
+    await postMessage({
+      channel: event.channel,
+      thread_ts: event.thread_ts ?? event.ts,
+      text: `Heads-up: this request was flagged for review (${decision.flags.join(', ')}). Proceeding, but a human may audit it.`,
+    });
+  }
+
   await postMessage({
     channel: event.channel,
     thread_ts: event.thread_ts ?? event.ts,

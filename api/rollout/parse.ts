@@ -1,6 +1,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { waitUntil } from '@vercel/functions';
 import { createRunStoreFromEnv } from '../../packages/store/src/index.ts';
+import { audit, pipelinePaused, rolloutMaxPct } from '../../packages/guard/src/index.ts';
 import {
   ACTION,
   RUN_COMPLETE_SECRET_HEADER,
@@ -51,10 +52,23 @@ function rollbackBlocks(): unknown[] {
 async function handle(run: Run, user: string, text: string): Promise<void> {
   if (run.state === 'await_rollout') {
     const pct = Number(PCT_RE.exec(text)?.[1]);
+    const cap = rolloutMaxPct();
     if (!Number.isInteger(pct) || pct <= 0 || pct > 100) {
       await postToThread(run.channel, run.thread_ts, 'Say e.g. "roll out to 15%" — a whole percent between 1 and 100.');
       return;
     }
+    // Hard cap on the automated path: beyond ROLLOUT_MAX_PCT a human sets
+    // the rollout in PostHog directly — NL parsing never gets there.
+    if (pct > cap) {
+      await audit('rollout_over_cap', { thread_ts: run.thread_ts, user, pct, cap });
+      await postToThread(
+        run.channel,
+        run.thread_ts,
+        `${pct}% exceeds the automated cap (${cap}%). A human can roll it higher directly in PostHog.`,
+      );
+      return;
+    }
+    await audit('rollout_requested', { thread_ts: run.thread_ts, user, pct });
     await postToThread(run.channel, run.thread_ts, `Roll out to ${pct}%?`, rolloutConfirmBlocks(pct));
     return;
   }
@@ -77,6 +91,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   res.status(200).send('ok');
+  if (pipelinePaused()) return;
   if (!pmUserIds().includes(body.user)) return; // PM-only control plane
 
   const run = await createRunStoreFromEnv().get(body.thread_ts);

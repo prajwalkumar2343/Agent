@@ -1,8 +1,9 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { waitUntil } from '@vercel/functions';
-import { requireEnv } from '../../packages/shared/src/env';
+import { requireEnv, pmUserIds } from '../../packages/shared/src/env';
 import { ACTION } from '../../packages/shared/src/contracts';
 import { verifySlackSignature } from '../../packages/slack-kit/src/index';
+import { audit, pipelinePaused, rolloutMaxPct } from '../../packages/guard/src/index.ts';
 
 export const config = { api: { bodyParser: false }, maxDuration: 30 };
 
@@ -54,11 +55,45 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const known = Object.values(ACTION) as string[];
   if (!known.includes(actionId)) return;
 
+  const userId = payload.user?.id ?? '';
+  const respond = (text: string) =>
+    respondEphemeral(payload.response_url!, text).catch((err) =>
+      console.error('respondEphemeral failed', err),
+    );
+
+  // Control-plane actions are PM-only — a random workspace member (or a
+  // forged-looking click) must never advance rollout/rollback.
+  if (!pmUserIds().includes(userId)) {
+    waitUntil(
+      audit('interaction_denied', { user: userId, action: actionId }).then(() =>
+        respond('Only PMs can drive rollouts.'),
+      ),
+    );
+    return;
+  }
+  if (pipelinePaused()) {
+    waitUntil(respond('Pipeline is paused (AGENT_PAUSED) — no actions right now.'));
+    return;
+  }
+
+  // rollout_confirm carries the target pct in value — bounds-check the
+  // hard cap here too, since the card could be replayed or crafted.
+  if (actionId === ACTION.ROLLOUT_CONFIRM) {
+    const pct = Number(payload.actions?.[0]?.value);
+    const cap = rolloutMaxPct();
+    if (!Number.isInteger(pct) || pct <= 0 || pct > cap) {
+      waitUntil(respond(`Invalid rollout — pct must be a whole number between 1 and ${cap}.`));
+      return;
+    }
+  }
+
   waitUntil(
-    respondEphemeral(
-      payload.response_url,
-      `Received \`${actionId}\` — rollout execution comes online with the rollout workstream.`,
-    ).catch((err) => console.error('respondEphemeral failed', err)),
+    audit('interaction', { user: userId, action: actionId, value: payload.actions?.[0]?.value }).then(
+      () =>
+        respond(
+          `Received \`${actionId}\` — rollout execution comes online with the rollout workstream.`,
+        ),
+    ),
   );
 }
 

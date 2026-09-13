@@ -2,9 +2,9 @@ import crypto from 'node:crypto';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { waitUntil } from '@vercel/functions';
 import {
-  createPostHogClient,
+  createPostHogMcp,
   findFlagByKey,
-  posthogConfigFromEnv,
+  posthogMcpConfigFromEnv,
   setRolloutPercentage,
 } from '../../packages/posthog/src/index.ts';
 import {
@@ -14,9 +14,17 @@ import {
   type RunStore,
 } from '../../packages/store/src/index.ts';
 import { requireEnv, type Run } from '../../packages/shared/src/index.ts';
-import { checksGreen, mergePr } from '../_lib/github.ts';
+import { checksGreen, mergePr, prFiles } from '../_lib/github.ts';
 import { dmUser, postToThread } from '../_lib/notify.ts';
 import { header, readRawBody } from '../_lib/http.ts';
+import {
+  audit,
+  pipelinePaused,
+  reviewDiffForMerge,
+  rolloutMaxPct,
+  scanPrFiles,
+  summarizeFindings,
+} from '../../packages/guard/src/index.ts';
 
 export const config = { api: { bodyParser: false }, maxDuration: 30 };
 
@@ -32,7 +40,12 @@ interface CheckRunEvent {
 
 function verifyGitHubSignature(raw: string, signature: string): boolean {
   const secret = process.env.GH_WEBHOOK_SECRET;
-  if (!secret) return true; // webhook secret is optional until configured — see docs/ENV.md
+  if (!secret) {
+    // Fail closed: a forged "CI green" check_run would otherwise trigger a
+    // merge. ALLOW_INSECURE_WEBHOOKS=1 exists for local dev only — never
+    // set it on the Vercel deployment.
+    return process.env.ALLOW_INSECURE_WEBHOOKS === '1';
+  }
   const expected = 'sha256=' + crypto.createHmac('sha256', secret).update(raw).digest('hex');
   const a = Buffer.from(expected);
   const b = Buffer.from(signature);
@@ -55,14 +68,63 @@ async function onChecksSettled(store: RunStore, run: Run, sha: string): Promise<
     );
     return;
   }
-  const pct = run.pending_rollout?.pct ?? 0;
+  // Merge gate: scan the PR diff before anything reaches main — deterministic
+  // scan first, then a guardian-style second-opinion review of the same diff
+  // against the spec. block/hold/suspicious all stop auto-merge and hand the
+  // PR to the PM — the branch and PR stay open for human review.
+  if (run.pr_number) {
+    const files = await prFiles(run.pr_number);
+    const findings = scanPrFiles(files);
+    const review = await reviewDiffForMerge({
+      specTitle: run.spec?.title,
+      specSummary: run.spec?.summary,
+      flagKey: run.flag_key,
+      files,
+    });
+    if (review?.verdict === 'suspicious') {
+      findings.push(
+        ...review.reasons.map((detail) => ({
+          severity: 'hold' as const,
+          rule: 'merge-review',
+          detail: `reviewer: ${detail}`,
+        })),
+      );
+    }
+    const stopping = findings.filter((f) => f.severity !== 'warn');
+    await audit('merge_gate', {
+      thread_ts: run.thread_ts,
+      pr_number: run.pr_number,
+      verdict: stopping.length ? 'held' : 'clean',
+      findings,
+      review: review?.verdict ?? 'skipped',
+    });
+    if (stopping.length) {
+      await transitionRun(store, run.thread_ts, 'await_rollout', { pending_rollout: undefined });
+      const msg =
+        `CI is green but the merge gate held ${run.pr_url ?? run.branch}:\n` +
+        summarizeFindings(stopping) +
+        '\nReview the diff — merge it manually on GitHub or close it.';
+      await postToThread(run.channel, run.thread_ts, msg);
+      await dmUser(run.pm_id, msg);
+      return;
+    }
+  }
+
+  if (pipelinePaused()) {
+    await audit('merge_paused', { thread_ts: run.thread_ts, pr_number: run.pr_number });
+    await transitionRun(store, run.thread_ts, 'await_rollout', { pending_rollout: undefined });
+    await dmUser(run.pm_id, `Pipeline is paused (AGENT_PAUSED) — ${run.pr_url ?? run.branch} was NOT merged.`);
+    return;
+  }
+
+  const pct = Math.min(run.pending_rollout?.pct ?? 0, rolloutMaxPct());
   if (run.pr_number) await mergePr(run.pr_number, sha);
-  const ph = createPostHogClient(posthogConfigFromEnv());
-  const flagId = run.flag_id ?? (run.flag_key ? (await findFlagByKey(ph, run.flag_key))?.id : undefined);
-  if (run.flag_key && flagId != null) await setRolloutPercentage(ph, flagId, pct);
+  const ph = createPostHogMcp(posthogMcpConfigFromEnv());
+  const flag = run.flag_key ? await findFlagByKey(ph, run.flag_key) : null;
+  if (flag) await setRolloutPercentage(ph, flag, pct);
   await transitionRun(store, run.thread_ts, 'live', {
     rollout_pct: pct,
-    flag_id: flagId,
+    flag_id: flag?.id ?? run.flag_id,
     report_schedule: scheduleReports(Date.now()),
   });
   await postToThread(

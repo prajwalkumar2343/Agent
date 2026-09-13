@@ -44,3 +44,23 @@ export async function mergePr(prNumber: number, sha: string): Promise<void> {
     body: { merge_method: 'squash', sha },
   });
 }
+
+export interface PrFile {
+  filename: string;
+  status: string;
+  /** Per-file unified diff (absent on huge/binary files). */
+  patch?: string;
+}
+
+/** List a PR's changed files — up to 3 pages × 100 for the merge gate. */
+export async function prFiles(prNumber: number): Promise<PrFile[]> {
+  const files: PrFile[] = [];
+  for (let page = 1; page <= 3; page++) {
+    const batch = await gh<PrFile[]>(
+      `/repos/${repo()}/pulls/${prNumber}/files?per_page=100&page=${page}`,
+    );
+    files.push(...batch);
+    if (batch.length < 100) break;
+  }
+  return files;
+}
