@@ -8,7 +8,7 @@
 ```
 
 > Ideas can come from anywhere not just from PMs mind
-> this project enables anyone inside the organisation to pitch an idea, it gets built, verified by using simulated audiences (this project uses outset for it), and the PR comes for review along with audience reports to the PM
+> this slackbot agent enables anyone inside the organisation to pitch an idea, it gets built, verified by using simulated audiences (this project uses outset for it), and the PR comes for review along with audience reports to the PM
 
 
 ```
