@@ -1,14 +1,8 @@
 # Agent — the Slack-native feature pipeline
 
-> Everyone has feature ideas. Almost no one can ship them — and even PMs can't
-> tell whether users will love a feature until they *see* it.
->
-> Agent closes that gap. Drop a one-line idea in Slack and an autonomous
-> pipeline turns it into a real, working PR on your product repo — complete
-> with usage evidence, a simulated audience verdict, and a staged PostHog
-> rollout with live metric reports. People stop guessing what users want and
-> start *judging a built thing*. Product contribution stops being gated on
-> who can code.
+> Ideas can come from anywhere not just from PMs mind
+> this project enables anyone inside the organisation to pitch an idea, it gets built, verified by using simulated audiences (this project uses outset for it), and the PR comes for review along with audience reports to the PM
+
 
 ```
 "what if we had saved filters?"                      (anyone, in Slack)
