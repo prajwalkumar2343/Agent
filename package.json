@@ -7,7 +7,18 @@
   ],
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "node --test --experimental-strip-types packages/*/src/*.test.ts packages/*/test/*.test.ts"
+    "test": "node --test --experimental-strip-types packages/*/src/*.test.ts packages/*/test/*.test.ts",
+    "sim:mcp": "node --experimental-strip-types packages/sim/src/mcp/server.ts",
+    "evals:dataset": "node --experimental-strip-types packages/runner/evals/src/gen-dataset.ts",
+    "evals:verify": "node --experimental-strip-types packages/runner/evals/src/run.ts --model mock",
+    "evals:run": "node --experimental-strip-types packages/runner/evals/src/run.ts --model live",
+    "evals:judge": "node --experimental-strip-types packages/runner/evals/src/run.ts --model live --judge on",
+    "evals:gate": "node --experimental-strip-types packages/runner/evals/src/gate.ts",
+    "evals:calibrate": "node --experimental-strip-types packages/runner/evals/src/calibrate.ts",
+    "evals:review": "node --experimental-strip-types packages/runner/evals/src/review.ts",
+    "evals:score-online": "node --experimental-strip-types packages/runner/evals/online/score-run.ts",
+    "evals:alerts": "node --experimental-strip-types packages/runner/evals/online/alerts.ts",
+    "evals:export-failures": "node --experimental-strip-types packages/runner/evals/online/export-failures.ts"
   },
   "engines": {
     "node": ">=20"
