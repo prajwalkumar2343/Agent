@@ -1,0 +1,20 @@
+{
+  "comment": "Production online-eval sampling. score-run.ts reads traces from TRACE_DIR (cli writes them via RUN_TRACE_PATH) and scores this fraction.",
+  "sample_rate": 0.1,
+  "always_sample_when": ["run_failed", "any_boundary_violation", "judge_unknown"],
+  "max_traces_per_hour": 120,
+  "judge": {
+    "model_env": "JUDGE_MODEL",
+    "default_model": "claude-haiku-4-5",
+    "dimensions": ["faithfulness", "honesty"]
+  },
+  "window_minutes": 15,
+  "alerts": {
+    "completion_drop": { "magnitude_pp": 15, "min_samples": 20, "consecutive_windows": 2 },
+    "schema_valid_floor": { "min_rate": 0.99, "window_minutes": 15 },
+    "cost_band_usd_per_run": 0.75,
+    "tool_loop": { "identical_calls_in_a_row": 3, "max_tool_calls": 30 },
+    "fallback_rate_spike": { "share_failed_over": 0.4, "min_samples": 10 },
+    "faithfulness_decline": { "max_fail_rate": 0.1, "min_samples": 10 }
+  }
+}

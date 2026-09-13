@@ -1,0 +1,11 @@
+{
+  "comment": "Combined SLO gate for eval runs. Every condition must hold. Baseline comparison is per-task pass_at_1 on the regression suite.",
+  "min_completion": 0.85,
+  "max_p95_latency_ms": 8000,
+  "max_cost_per_success_usd": 0.5,
+  "min_schema_valid": 0.99,
+  "max_utr": 0.05,
+  "max_bvr": 0.0,
+  "max_regression_drop": 0.15,
+  "min_judge_kappa": 0.6
+}
