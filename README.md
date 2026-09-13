@@ -83,7 +83,7 @@ gets only the tools its trust level earns:
 | Agent | Zone | Tools | What it can't do |
 |---|---|---|---|
 | **Orchestrator** | trusted | `listFiles` `readFile` `runShell` `posthog` `delegate_to_vm_coder` | write files, commit, push, see secrets |
-| **pi coding agent** | untrusted VM | its full coding toolset | see pipeline secrets, push, reach the network beyond the template egress firewall |
+| **pi coding agent** | untrusted VM | its full coding toolset + git push to its fixed `agent/*` branch (`GH_TOKEN` via credential helper) | see pipeline secrets beyond `PI_API_KEY`/`GH_TOKEN`, touch `main`, reach the network beyond the template egress firewall |
 
 - **The orchestrator never writes code.** It orients on the repo, delegates
   a complete spec to the VM, then *re-runs the repo's own checks* on the
@@ -93,27 +93,32 @@ gets only the tools its trust level earns:
   a cumulative `git diff`. The delegate tool mirrors it locally with
   `checkout -- . && clean -fd && git apply`, so repeat "fix this failure"
   calls stay exactly in sync with the sandbox tree.
-- **Remote state lives behind tools, not the model.** Once verification
-  passes, the pipeline commits the tree via the Git Data API (blobs → tree
-  → commit → ref) and opens the PR. The orchestrator's `git` is read-only
-  by policy — it can `status`/`diff`/`log`, nothing more.
+- **Remote state belongs to pi, inside the VM.** pi commits on its fixed
+  branch, pushes it via the `$GH_TOKEN` credential helper, and opens the PR
+  (REST) — reporting the PR URL back with the diff. The orchestrator's
+  `git` is read-only by policy — it can `status`/`diff`/`log`, nothing more.
 
 Invariants live in **code, not prompts**: the branch name
-(`agent/<slug>-<thread_ts>`) is computed at dispatch and fixed inside the
-tool context; `openPR` accepts only title + body; the model can call
-`delegate_to_vm_coder` at most `MAX_VM_INVOCATIONS` times because the tool
-counts.
+(`agent/<slug>-<thread_ts>`) is computed at dispatch and pinned in the
+sandbox's git target; the remote URL and credential helper are configured
+by the ship script, not by pi; the model can call `delegate_to_vm_coder` at
+most `MAX_VM_INVOCATIONS` times because the tool counts.
 
 ### The VM boundary (E2B Firecracker microVMs)
 
 `packages/runner/src/sandbox/` is a provider port — `e2b` in production,
 `local` for dev — but the contract is the interesting part:
 
-- The sandbox sees the repo and **one** secret: `PI_API_KEY`. `GH_AGENT_PAT`,
-  Slack, KV, and PostHog secrets never cross.
-- Git inside the VM is **sealed**: remote removed, credential helpers and
-  every `http.*`/`url.*` config stripped, `GIT_TERMINAL_PROMPT=0`,
-  `GIT_CONFIG_GLOBAL=/dev/null` — `git push` cannot authenticate to anything.
+- The sandbox sees the repo and **two** secrets: `PI_API_KEY` plus
+  `GH_TOKEN` (the fine-grained PAT pi spends on its `agent/*` push + PR).
+  Slack, KV, PostHog, and the callback secrets never cross.
+- Git inside the VM is **sealed except its fixed remote**: shipped `.git` is
+  stripped of all remotes/credential config, then `origin` is re-added
+  through a credential helper that reads `$GH_TOKEN` from env at push time —
+  the token never lands in `.git/config`. `GIT_TERMINAL_PROMPT=0`,
+  `GIT_CONFIG_GLOBAL=/dev/null`, no askpass/ssh — every other auth path is
+  dead; `main` stays safe via the fixed `agent/*` branch + repo-side branch
+  protection.
 - Node + pi bootstrap userspace-only on the stock `base` template; each
   invocation streams pi's JSONL events back for trace analysis, and the
   diff is collected even if pi crashes mid-run.
@@ -241,7 +246,7 @@ model could talk its way past. Full detail in `docs/SAFEGUARDS.md`.
 | **Prompt injection** — jailbreaks in the idea text, or instructions planted in repo files/comments | Intake screening (`screenFeatureIdea`: override/persona/jailbreak/shell-exec patterns, zero-width chars stripped first so they can't smuggle past the regexes); untrusted-data framing in every prompt; and the argv shell policy — injected text can *say* `git push`, the policy won't *run* it |
 | **Shell escape** — pipes, `$( )`, `sh -c`, `g"it" push` | `guard/shell.ts` lexes every command into argv segments and vets each separately: substitutions, subshells, quote-concatenation, and wrappers (`env`/`nice`/`timeout`) all resolve to the real argv0. Git is read-only-allowlist; anything unparseable is denied outright — there's no human to prompt |
 | **Secret exfiltration** | Secrets flow as `vault:NAME` refs that resolve inside tool implementations at the moment they're spent — no tool exists that resolves one into model context. `envpol.ts` drops `*KEY*`/`*SECRET*`/`*TOKEN*`-shaped vars from every spawned shell; trace tool inputs are hashed, never stored raw |
-| **Reaching `main` / tampering CI** | Only `agent/*` refs can be created or committed — `assertAgentBranch` runs at toolset *construction*, so a manipulated context fails before the first call. Diffs touching workflows, CODEOWNERS, hooks, `.env*` are refused at commit. The PAT has no `workflows` scope — it physically cannot push CI changes |
+| **Reaching `main` / tampering CI** | pi's branch is fixed upstream — `assertAgentBranch` runs in `cli.ts` before the sandbox is built, so a manipulated context fails before anything runs. Diffs touching workflows, CODEOWNERS, hooks, `.env*` are rejected at the merge gate. The PAT has no `workflows` scope — it physically cannot push CI changes |
 | **Malicious diff / backdoor** | Merge gate: deterministic scan (`eval`, `child_process`, encoded blobs, credential strings → block; dependency-manifest changes → hold for human) plus a second-opinion model that sees only spec + diff and answers "does this do anything beyond the spec?" — `suspicious` holds the merge |
 | **Forged approvals / fake callbacks** | Slack HMAC + team allowlist on every request; GitHub webhook HMAC (fail-closed); `x-run-secret` on run callbacks and deploy endpoints. Rollout buttons re-verify the PM allowlist *at click time* — a forwarded card can't approve anything |
 | **Sandbox compromise** | The VM is Firecracker-isolated and has nothing to steal: remote removed, all credential config stripped, `GIT_TERMINAL_PROMPT=0`, egress firewall to github.com + registries only. It sees exactly one secret (`PI_API_KEY`) and returns only a diff |
@@ -266,7 +271,7 @@ thin port so the pipeline stays testable offline.
 | Tool | What the agent does with it |
 |---|---|
 | **Slack** | The whole front door: `app_mention`/DM intake, Block Kit spec / feature-check / evidence / confirm cards, interactive rollout & rollback buttons, PM DMs, metric reports posted back into the run thread. HMAC signature verification + team allowlist on every request. |
-| **GitHub** | `workflow_dispatch` spins the run up on Actions; the pipeline creates `agent/*` branches and commits via the Git Data API; `check_run` webhooks drive the merge gate → auto-merge. Branch protection + a fine-grained PAT (no `workflows` scope) bound what it can touch. |
+| **GitHub** | `workflow_dispatch` spins the run up on Actions; pi pushes its `agent/*` branch from inside the VM and opens the PR over REST; `check_run` webhooks drive the merge gate → auto-merge. Branch protection + a fine-grained PAT (no `workflows` scope) bound what it can touch. |
 | **Outset.ai** | The audience-simulation step, over MCP: the spec, feature check, evidence and PR go to Outset's `analyze_feature` tool; back comes a `ship / iterate / drop` verdict, a confidence score, and per-persona reactions (power-user, new-user, admin…) that land on the PM's report card. |
 | **PostHog** | Four jobs over the hosted MCP server (`mcp.posthog.com`, one transport): taxonomy search + HogQL evidence (related events, 30-day counts, sessions to replay), flag creation at 0%, the rollout mutation itself, and the scheduled `$feature_flag_called` / `$exception` metric reports. |
 | **Mintlify** | Docs MCP search — one signal in the "does this feature already exist?" check (the shipped-feature index `features.md` is authoritative; the PostHog event taxonomy is the third signal). |
