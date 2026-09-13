@@ -22,10 +22,12 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
         with:
           path: platform
+          persist-credentials: false
 
       - uses: actions/setup-node@v4
         with:
@@ -42,6 +44,11 @@ jobs:
           repository: ${{ vars.PRODUCT_REPO }}
           token: ${{ secrets.GH_AGENT_PAT }}
           path: product
+          # Critical: keep the PAT out of product/.git/config. The repo is
+          # tarred into the sandbox VM — a persisted token would let the
+          # coding agent authenticate pushes to main. All GitHub writes go
+          # through the REST tools with the token held in-process.
+          persist-credentials: false
 
       - name: run coding agent
         working-directory: platform
@@ -55,7 +62,20 @@ jobs:
           PRODUCT_REPO: ${{ vars.PRODUCT_REPO }}
           PRODUCT_REPO_DIR: ${{ github.workspace }}/product
           GH_AGENT_PAT: ${{ secrets.GH_AGENT_PAT }}
+          LLM_PROVIDER: ${{ vars.LLM_PROVIDER }}
+          LLM_MODEL: ${{ vars.LLM_MODEL }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
+          SANDBOX_PROVIDER: ${{ vars.SANDBOX_PROVIDER }}
+          E2B_API_KEY: ${{ secrets.E2B_API_KEY }}
+          E2B_TEMPLATE: ${{ vars.E2B_TEMPLATE }}
+          PI_PROVIDER: ${{ vars.PI_PROVIDER }}
+          PI_MODEL: ${{ vars.PI_MODEL }}
+          PI_API_KEY: ${{ secrets.PI_API_KEY }}
+          POSTHOG_API_KEY: ${{ secrets.POSTHOG_API_KEY }}
+          POSTHOG_PROJECT_ID: ${{ vars.POSTHOG_PROJECT_ID }}
+          POSTHOG_MCP_URL: ${{ vars.POSTHOG_MCP_URL }}
           RUN_CALLBACK_SECRET: ${{ secrets.RUN_CALLBACK_SECRET }}
           LOG_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: node --experimental-strip-types packages/runner/src/cli.ts

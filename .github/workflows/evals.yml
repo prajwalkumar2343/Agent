@@ -1,0 +1,102 @@
+name: evals
+
+# Eval harness for the runner agent pipeline (packages/runner/evals).
+# Two tiers:
+#   verify    — every PR/push: regenerates the dataset and replays every
+#               reference trajectory through the production harness. No model
+#               key needed; a failing reference = broken task or broken
+#               harness, and it fails the PR.
+#   live      — main + nightly + manual: the real model, 3 trials/task,
+#               judge on, then the combined SLO gate (gate.config.json).
+#               PRs also run a 1-trial regression pass when the Anthropic key
+#               is available.
+on:
+  pull_request:
+    paths:
+      - 'packages/runner/**'
+      - 'packages/shared/**'
+      - 'api/**'
+      - '.github/workflows/evals.yml'
+  push:
+    branches: [main]
+  schedule:
+    - cron: '17 */6 * * *'
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run evals:dataset
+      - name: reference verification (mock model — all must pass)
+        run: npm run evals:verify
+
+  regression:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: check for model key
+        id: key
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: echo "present=${ANTHROPIC_API_KEY:+yes}" >> "$GITHUB_OUTPUT"
+      - name: live regression suite (1 trial)
+        if: steps.key.outputs.present == 'yes'
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: npm run evals:run -- --suite regression --trials 1
+      - name: gate
+        if: steps.key.outputs.present == 'yes'
+        run: npm run evals:gate
+      - uses: actions/upload-artifact@v4
+        if: always() && steps.key.outputs.present == 'yes'
+        with:
+          name: evals-pr-${{ github.sha }}
+          path: packages/runner/evals/results/
+          retention-days: 14
+
+  full:
+    runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run evals:dataset
+      - name: full suite (3 trials, judge on)
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          JUDGE_MODEL: claude-haiku-4-5
+        run: npm run evals:judge -- --suite all --trials 3
+      - name: gate
+        run: npm run evals:gate
+      - name: review queue
+        if: failure()
+        run: npm run evals:review
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: evals-${{ github.sha }}
+          path: |
+            packages/runner/evals/results/
+            packages/runner/evals/history.jsonl
+          retention-days: 30
