@@ -1,0 +1,61 @@
+name: feature-run
+
+# Dispatched by the platform when a run enters `build`. Input + callback
+# contract: docs/CONTRACTS.md. The agent entry point is
+# packages/runner/src/cli.ts (A7) — it owns branch/commit/PR and the
+# runs/complete callback; this workflow only provides both checkouts and env.
+on:
+  workflow_dispatch:
+    inputs:
+      thread_ts: { required: true, type: string }
+      spec_json: { required: true, type: string }
+      feature_context_json: { required: true, type: string }
+      evidence_json: { required: true, type: string }
+      flag_key: { required: true, type: string }
+      callback_url: { required: true, type: string }
+
+concurrency: feature-run-${{ inputs.thread_ts }}
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: platform
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: platform/package-lock.json
+
+      - run: npm ci
+        working-directory: platform
+
+      - name: checkout product repo
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ vars.PRODUCT_REPO }}
+          token: ${{ secrets.GH_AGENT_PAT }}
+          path: product
+
+      - name: run coding agent
+        working-directory: platform
+        env:
+          THREAD_TS: ${{ inputs.thread_ts }}
+          SPEC_JSON: ${{ inputs.spec_json }}
+          FEATURE_CONTEXT_JSON: ${{ inputs.feature_context_json }}
+          EVIDENCE_JSON: ${{ inputs.evidence_json }}
+          FLAG_KEY: ${{ inputs.flag_key }}
+          CALLBACK_URL: ${{ inputs.callback_url }}
+          PRODUCT_REPO: ${{ vars.PRODUCT_REPO }}
+          PRODUCT_REPO_DIR: ${{ github.workspace }}/product
+          GH_AGENT_PAT: ${{ secrets.GH_AGENT_PAT }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          RUN_CALLBACK_SECRET: ${{ secrets.RUN_CALLBACK_SECRET }}
+          LOG_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: node --experimental-strip-types packages/runner/src/cli.ts

@@ -1,4 +1,4 @@
-import type { RunState } from './states';
+import type { RunState } from './states.ts';
 
 export interface Spec {
   title: string;

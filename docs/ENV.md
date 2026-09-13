@@ -19,6 +19,9 @@
 | `CRON_SECRET` | generate | Vercel env + Actions secret |
 | `SIM_PROVIDER` | `mock` until real tool chosen | Vercel env |
 | `SIM_API_URL`, `SIM_API_KEY` | TBD with provider | Vercel env |
+| `GH_WEBHOOK_SECRET` | repo webhook secret (optional but recommended) | Vercel env |
+| `APP_URL` | public Vercel hostname, no scheme (`your-app.vercel.app`) | Actions variable |
+| `ANTHROPIC_MODEL` | optional, defaults to `claude-sonnet-4-5` | Actions env |
 
 PAT scopes: platform repo → `actions:write`; product repo →
 `contents:write`, `pull_requests:write` (+ merge permission — check required

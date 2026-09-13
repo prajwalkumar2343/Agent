@@ -1,0 +1,14 @@
+name: sweep
+
+on:
+  schedule:
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
+
+jobs:
+  sweep:
+    runs-on: ubuntu-latest
+    steps:
+      - name: hit cron endpoint
+        run: |
+          curl -fsS "https://${{ vars.APP_URL }}/api/cron/sweep?secret=${{ secrets.CRON_SECRET }}"

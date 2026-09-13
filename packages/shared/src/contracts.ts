@@ -1,4 +1,4 @@
-import type { SimReport } from './types';
+import type { SimReport } from './types.ts';
 
 export const RUN_COMPLETE_SECRET_HEADER = 'x-run-secret';
 
