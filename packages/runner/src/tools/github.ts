@@ -4,6 +4,7 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 import { tool, type ToolSet } from 'ai';
 import { z } from 'zod';
+import { assertAgentBranch, scanChangedPaths } from '../../../guard/src/index.ts';
 
 const execFileAsync = promisify(execFile);
 
@@ -34,6 +35,10 @@ type Fetch = typeof fetch;
  * (blobs → tree → commit → ref) lives here, not in model discipline.
  */
 export function githubTools(ctx: GithubToolsContext): ToolSet {
+  // Hard gate, not prompt discipline: refuse to build the toolset at all if
+  // the caller hands us anything but an `agent/*` feature branch — this is
+  // what physically prevents a commit or PR against main.
+  assertAgentBranch(ctx.branch, ctx.base);
   const call: Fetch = ctx.fetchFn ?? fetch;
 
   async function gh<T>(p: string, init?: { method?: string; body?: unknown }): Promise<T> {
@@ -118,6 +123,21 @@ export function githubTools(ctx: GithubToolsContext): ToolSet {
         const files = await changedFiles();
         if (!files.length) return { committed: false, note: 'working tree is clean' };
 
+        // Self-modification wall: the agent can never land CI workflow,
+        // CODEOWNERS, env, agent-config, or dependency-manifest changes —
+        // those get a human review via the merge gate instead.
+        const blocked = scanChangedPaths(files.map((f) => f.path)).filter(
+          (f) => f.severity === 'block',
+        );
+        if (blocked.length) {
+          return {
+            committed: false,
+            error:
+              'refused: diff touches protected paths: ' +
+              blocked.map((b) => `${b.path} (${b.rule})`).join(', '),
+          };
+        }
+
         const headSha = await refSha(ctx.branch);
         const head = await gh<{ tree: { sha: string } }>(`git/commits/${headSha}`);
 
@@ -126,7 +146,11 @@ export function githubTools(ctx: GithubToolsContext): ToolSet {
             if (f.deleted) {
               return { path: f.path, mode: '100644' as const, type: 'blob' as const, sha: null };
             }
-            const content = await readFile(path.join(ctx.repoDir, f.path), 'utf8');
+            const resolved = path.resolve(ctx.repoDir, f.path);
+            if (!resolved.startsWith(path.resolve(ctx.repoDir) + path.sep)) {
+              throw new Error(`path escapes repoDir: ${f.path}`);
+            }
+            const content = await readFile(resolved, 'utf8');
             const blob = await gh<{ sha: string }>(`git/blobs`, {
               method: 'POST',
               body: { content, encoding: 'utf-8' },
