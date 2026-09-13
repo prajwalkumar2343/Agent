@@ -154,10 +154,10 @@ export function collectPatchScript(dir: string = SBX.dir): string {
 /**
  * Strip every credential path out of the shipped .git — the tarball may carry
  * a persisted-actions/checkout token in .git/config (extraheader) or a real
- * remote URL. Without this, pi inside the VM could `git push origin main`
- * and authenticate with the pipeline's PAT. After sanitize, the repo has no
- * remote, no credential helper, and no http/url auth config — and
- * GIT_TERMINAL_PROMPT=0 in the run env makes a credential prompt impossible.
+ * remote URL with an embedded PAT. pi does push from inside the VM now, but
+ * only through the credential helper configureRemoteScript installs — never
+ * through whatever auth the checkout happened to carry. After sanitize the
+ * repo has no remote, no credential helper, and no http/url auth config.
  */
 export function sanitizeRepoScript(repoDir: string = SBX.repo): string {
   return [

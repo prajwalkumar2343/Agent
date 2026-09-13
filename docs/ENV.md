@@ -15,7 +15,7 @@ keywords, never the values.
 | `KV_REST_API_URL`, `KV_REST_API_TOKEN` | Vercel → Storage → KV | Vercel env (auto) |
 | `POSTGRES_URL` / `DATABASE_URL` | Vercel → Storage → Postgres (Neon) — the product DB whose `users` table backs cohort deploys | Vercel env (auto) |
 | `POSTGRES_SSL` | `disable` for local Postgres; otherwise SSL on with relaxed CA check | Vercel env |
-| `GH_AGENT_PAT` | GitHub → fine-grained PAT (see scopes below) | Vercel env + Actions secret |
+| `GH_AGENT_PAT` | GitHub → fine-grained PAT (see scopes below) — crosses into the pi sandbox as `GH_TOKEN` (pi pushes its fixed `agent/*` branch + opens the PR itself) | Vercel env + Actions secret |
 | `PRODUCT_REPO` | `owner/name` of the product repo | Vercel env + Actions |
 | `PLATFORM_REPO` | `prajwalkumar2343/Agent` | Vercel env + Actions |
 | `POSTHOG_API_KEY` | PostHog → personal API key, **MCP Server** preset | Vercel env + Actions secret |
@@ -23,7 +23,7 @@ keywords, never the values.
 | `POSTHOG_MCP_URL` | optional, defaults to `https://mcp.posthog.com/mcp` | Vercel env + Actions var |
 | `POSTHOG_MCP_FEATURES` | optional `?features=` allowlist (e.g. `flags,events,sql`) | Vercel env |
 | `DOCS_MCP_URL` | `https://<mintlify-site>/mcp` | Vercel env |
-| `LLM_PROVIDER` / `LLM_MODEL` | trusted-zone LLM for spec gen + orchestrator/github agent — `anthropic` (default), `openrouter`, `opencode`, `opencode-go` (Zen Go subscription tier) | Actions vars + Vercel env |
+| `LLM_PROVIDER` / `LLM_MODEL` | trusted-zone LLM for spec gen + orchestrator — `anthropic` (default), `openrouter`, `opencode`, `opencode-go` (Zen Go subscription tier) | Actions vars + Vercel env |
 | `LLM_REASONING_EFFORT` | optional `minimal|low|medium|high|xhigh` (`very high` → `xhigh`) — forwarded as `reasoningEffort`; opencode responses-endpoint models (`gpt-*`/`grok-*`/`muse-*`) only, ignored elsewhere | Actions vars + Vercel env |
 | `SPEC_PROVIDER` | `llm` (default) drafts the spec via `LLM_PROVIDER`; `mock` is deterministic, no LLM key (dev/tests) | Vercel env |
 | `ANTHROPIC_API_KEY` | console.anthropic.com | Vercel env + Actions secret |
@@ -33,7 +33,7 @@ keywords, never the values.
 | `E2B_API_KEY` | e2b.dev dashboard — runs the pi coding VM | Actions secret |
 | `E2B_TEMPLATE` | optional custom template with node+pi baked in (default `base`) | Actions var |
 | `PI_PROVIDER`, `PI_MODEL` | pi's LLM — defaults `anthropic` / `claude-sonnet-4-5`; also `openrouter`, `opencode`, `opencode-go`, `openai`, `google`, `groq`, `mistral` (per-provider default model applies) | Actions vars |
-| `PI_API_KEY` | key handed to pi **inside** the VM — the only secret that crosses the boundary (default: the provider's own key var, e.g. `ANTHROPIC_API_KEY` / `OPENROUTER_API_KEY` / `OPENCODE_API_KEY`) | Actions secret |
+| `PI_API_KEY` | key handed to pi **inside** the VM — crosses with `GH_TOKEN` (default: the provider's own key var, e.g. `ANTHROPIC_API_KEY` / `OPENROUTER_API_KEY` / `OPENCODE_API_KEY`) | Actions secret |
 | `VM_TIMEOUT_MS` | optional per-invocation pi budget (default 15 min) | Actions var |
 | `RUN_CALLBACK_SECRET` | generate (`openssl rand -hex 32`) | Vercel env + Actions secret |
 | `CRON_SECRET` | generate | Vercel env + Actions secret |

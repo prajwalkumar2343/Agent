@@ -65,7 +65,7 @@ export function evidenceFor(dim: JudgeDimension, task: EvalTask, ctx: EvalContex
         spec,
         '--- tool calls (in order) ---',
         ...ctx.toolCalls.map(toolLine),
-        ...(ctx.ghToolCalls.length ? ['--- github sub-agent ---', ...ctx.ghToolCalls.map(toolLine)] : []),
+        ...(ctx.ghToolCalls.length ? ['--- remote writes (pi inside the VM) ---', ...ctx.ghToolCalls.map(toolLine)] : []),
         `--- github world state ---\n${JSON.stringify({ branch_created: ctx.gh.branch_created, commits: ctx.gh.commit_shas, pr: ctx.gh.pr })}`,
         `--- final report ---\n${ctx.output}`,
       ].join('\n');

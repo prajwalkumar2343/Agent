@@ -45,9 +45,10 @@ jobs:
           token: ${{ secrets.GH_AGENT_PAT }}
           path: product
           # Critical: keep the PAT out of product/.git/config. The repo is
-          # tarred into the sandbox VM — a persisted token would let the
-          # coding agent authenticate pushes to main. All GitHub writes go
-          # through the REST tools with the token held in-process.
+          # tarred into the sandbox VM — a persisted token in config would be
+          # readable on disk there. The PAT reaches pi as the GH_TOKEN env var
+          # (credential helper at push time); pi pushes its fixed agent/*
+          # branch and opens the PR itself.
           persist-credentials: false
 
       - name: install pi (local sandbox)

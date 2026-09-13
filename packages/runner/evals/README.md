@@ -3,9 +3,10 @@
 An eval is useful iff it answers: **did the agent complete the task, why did
 it fail, what should we change next.** This harness runs the production
 agent shape — `createOrchestrator` (read-only workspace tools) →
-`delegate_to_vm_coder` (pi in a sandbox) → `delegate_to_github` (secondary
-agent) — against fixture repos, a scripted-or-live model, a scripted VM
-sandbox, and mocked GitHub REST / PostHog MCP backends.
+`delegate_to_vm_coder` (pi in a sandbox — it owns the remote writes too) —
+against fixture repos, a scripted-or-live model, a scripted VM sandbox that
+also simulates pi's remote writes, and mocked GitHub REST / PostHog MCP
+backends.
 
 ## Quickstart
 
@@ -27,9 +28,10 @@ trials.json, traces/). Score history appends to `evals/history.jsonl`
 
 ## What "mock" mode is
 
-`--model mock` replays each task's `reference.script` /
-`reference.github_script` through the real harness, real tools, and the real
-`git apply` patch path (`reference.vm_script` drives the fake sandbox). This
+`--model mock` replays each task's `reference.script` through the real
+harness, real tools, and the real `git apply` patch path
+(`reference.vm_script` drives the fake sandbox — including its simulated
+remote writes against the GitHub mock, recorded as `gh_*` calls). This
 is the **reference verification** — every task must pass every deterministic
 grader. A failing reference means a broken task or broken harness, never a
 weak model. CI runs this on every PR with no secrets.
@@ -43,8 +45,9 @@ task text — nothing a well-behaved agent couldn't know.
 
 Task shape: `input.spec` + `flag_key`, `environment.fixture` (see
 `fixtures.ts`), `github_mock` preset (see `github-mock.ts`), `posthog`
-(`true` or `{existing_flags}`), `reference.script` + `vm_script` +
-`github_script`, `graders`.
+(`true` or `{existing_flags}`), `reference.script` + `vm_script`,
+`graders`. (`github_script` is a deprecated leftover — the github
+sub-agent is gone; the sandbox simulates pi's remote writes.)
 
 ## The check DSL
 
@@ -108,5 +111,6 @@ dataset.
 - Mock-mode reference = *upper bound* on correctness, not a performance
   signal. Only `--model live` numbers mean anything about the agent.
 - The VM sandbox is scripted in evals — real pi behavior inside the sandbox
-  is out of scope here; this harness evaluates the orchestrator + github
-  agent boundary.
+  (incl. its actual git push/PR calls) is out of scope here; this harness
+  evaluates the orchestrator boundary plus the remote-write world state the
+  fake VM drives into the GitHub mock.

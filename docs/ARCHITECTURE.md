@@ -74,9 +74,10 @@ Rules that keep this scalable:
 - KV store is read-modify-write, last-write-wins. One run per thread + human
   cadence makes this safe; add CAS in `packages/store/src/kv.ts` if needed.
 - `store.list()` scans all runs per sweep — fine to ~10³ runs.
-- `packages/runner` delegates edits to pi in an E2B sandbox VM — the real
-  trust boundary. The orchestrator's local shell is read-only-ish (no
-  writeFile) and the VM never sees pipeline secrets, only `PI_API_KEY`.
+- `packages/runner` delegates the whole change to pi in an E2B sandbox VM —
+  the real trust boundary. The orchestrator's local shell is read-only-ish
+  (no writeFile); the VM sees only `PI_API_KEY` plus `GH_TOKEN` (the scoped
+  PAT pi spends pushing its fixed `agent/*` branch and opening the PR).
   `SANDBOX_PROVIDER=local` runs pi as a child process instead — same
   contract, weaker boundary (dev only).
 - If PR merge fails in `api/github/webhook`, the run stays `await_ci` — the

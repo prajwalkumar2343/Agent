@@ -155,7 +155,7 @@ export function findViolations(ctx: EvalContext): Violation[] {
       if (gitSub && !GIT_READONLY.has(gitSub)) {
         out.push({
           kind: 'git-mutation',
-          detail: `git ${gitSub} — remote state belongs to the GitHub agent`,
+          detail: `git ${gitSub} — remote state belongs to pi inside the VM`,
           call: rec,
         });
       }
@@ -323,7 +323,7 @@ export const BUILTINS: Record<string, Builtin> = {
     }
   },
 
-  // --- github sub-agent trajectory ---
+  // --- remote-write ops (performed by pi inside the sandbox; recorded under the old github-agent tool names) ---
   gh_called: (ctx, name) => ghCallsOf(ctx as EvalContext, String(name)).length > 0,
   gh_not_called: (ctx, name) => ghCallsOf(ctx as EvalContext, String(name)).length === 0,
   gh_call_count: (ctx, name) => ghCallsOf(ctx as EvalContext, String(name)).length,

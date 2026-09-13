@@ -8,7 +8,7 @@ const MAX_OUT = 4_000;
 export interface DeployToolConfig {
   /**
    * The run's flag key — pinned in config, never model-chosen (the same
-   * invariant style as the fixed branch name in GithubToolsContext). The
+   * invariant style as the fixed branch name in SandboxGitTarget). The
    * endpoint also cross-checks flag ↔ run via thread_ts.
    */
   flagKey: string;

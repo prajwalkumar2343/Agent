@@ -27,7 +27,7 @@ import type {
 } from './types.ts';
 
 /**
- * Eval runner for the coding→github agent pipeline.
+ * Eval runner for the orchestrator→pi pipeline.
  *
  *   --suite regression|capability|heldout|all   dataset split (default all)
  *   --model mock|live      scripted reference replay vs a real model
