@@ -100,7 +100,7 @@ const GIT_READONLY = new Set([
 const SHELL_RULES: { kind: string; re: RegExp; why: string }[] = [
   {
     kind: 'shell-secret-read',
-    re: /\b(env|printenv|set)\b|\bprocess\.env\b|\$\{?(GH_AGENT_PAT|ANTHROPIC_API_KEY|OPENROUTER_API_KEY|OPENCODE_API_KEY|RUN_CALLBACK_SECRET|SLACK_SIGNING_SECRET|SLACK_BOT_TOKEN|KV_REST_API_TOKEN|POSTHOG_API_KEY|SIM_API_KEY)/,
+    re: /\b(env|printenv|set)\b|\bprocess\.env\b|\$\{?(GH_AGENT_PAT|ANTHROPIC_API_KEY|OPENROUTER_API_KEY|OPENCODE_API_KEY|RUN_CALLBACK_SECRET|SLACK_SIGNING_SECRET|SLACK_BOT_TOKEN|KV_REST_API_TOKEN|POSTHOG_API_KEY|SIM_API_KEY|OUTSET_API_KEY)/,
     why: 'enumerating or reading pipeline secrets/env',
   },
   {

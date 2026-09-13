@@ -37,9 +37,11 @@ keywords, never the values.
 | `VM_TIMEOUT_MS` | optional per-invocation pi budget (default 15 min) | Actions var |
 | `RUN_CALLBACK_SECRET` | generate (`openssl rand -hex 32`) | Vercel env + Actions secret |
 | `CRON_SECRET` | generate | Vercel env + Actions secret |
-| `SIM_PROVIDER` | `mock` (in-process) or `mcp` (external sim app over MCP) | Vercel env |
+| `SIM_PROVIDER` | `mock` (in-process), `mcp` (external sim app over MCP), or `outset` (Outset app over MCP) | Vercel env |
 | `SIM_API_URL` | sim app MCP endpoint — mock app: `npm run sim:mcp` → `http://127.0.0.1:4100/mcp` | Vercel env |
 | `SIM_API_KEY` | optional bearer for the sim app | Vercel env |
+| `OUTSET_API_URL` | Outset app MCP endpoint | Vercel env |
+| `OUTSET_API_KEY` | optional bearer for the Outset app | Vercel env |
 | `GH_WEBHOOK_SECRET` | repo webhook secret — **required** unless `ALLOW_INSECURE_WEBHOOKS=1` (dev only) | Vercel env |
 | `APP_URL` | public Vercel hostname, no scheme (`your-app.vercel.app`) | Actions variable |
 | `ANTHROPIC_MODEL` | optional, defaults to `claude-sonnet-4-5` | Actions env |
